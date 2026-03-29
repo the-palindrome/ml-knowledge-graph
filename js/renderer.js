@@ -23,6 +23,8 @@ let animationPerformanceMode = false;
 let animationPerformanceRequests = 0;
 let deferredArrowRefresh = false;
 let activeCameraAnimation = null;
+let renderLoopStarted = false;
+let renderLoopPaused = false;
 
 const dummy = new THREE.Object3D();
 const tempColor = new THREE.Color();
@@ -44,6 +46,10 @@ const tangentA = new THREE.Vector3();
 const tangentB = new THREE.Vector3();
 const arrowPos = new THREE.Vector3();
 const arrowDir = new THREE.Vector3();
+const cameraSetPosition = new THREE.Vector3();
+const cameraSetTarget = new THREE.Vector3();
+const cameraStatePosition = new THREE.Vector3();
+const cameraStateTarget = new THREE.Vector3();
 
 const ARROW_RADIUS = 1.2;
 const ARROW_HEIGHT = 3.8;
@@ -713,20 +719,86 @@ export function setAutoRotate(enabled) {
   controls.autoRotateSpeed = 0.5;
 }
 
+export function setDeterministicMode(enabled) {
+  if (!controls) return;
+  const isEnabled = Boolean(enabled);
+  controls.autoRotate = false;
+  controls.enableDamping = !isEnabled;
+  controls.dampingFactor = isEnabled ? 0 : 0.08;
+  controls.update();
+}
+
+export function getCameraState() {
+  if (!camera || !controls) {
+    return null;
+  }
+  cameraStatePosition.copy(camera.position);
+  cameraStateTarget.copy(controls.target);
+  return {
+    position: {
+      x: cameraStatePosition.x,
+      y: cameraStatePosition.y,
+      z: cameraStatePosition.z,
+    },
+    target: {
+      x: cameraStateTarget.x,
+      y: cameraStateTarget.y,
+      z: cameraStateTarget.z,
+    },
+  };
+}
+
+export function setCameraState(nextState) {
+  if (!camera || !controls || !nextState) return;
+
+  const position = nextState.position ?? {};
+  const target = nextState.target ?? {};
+
+  cameraSetPosition.set(
+    Number.isFinite(position.x) ? position.x : camera.position.x,
+    Number.isFinite(position.y) ? position.y : camera.position.y,
+    Number.isFinite(position.z) ? position.z : camera.position.z,
+  );
+  cameraSetTarget.set(
+    Number.isFinite(target.x) ? target.x : controls.target.x,
+    Number.isFinite(target.y) ? target.y : controls.target.y,
+    Number.isFinite(target.z) ? target.z : controls.target.z,
+  );
+
+  camera.position.copy(cameraSetPosition);
+  controls.target.copy(cameraSetTarget);
+  controls.update();
+}
+
+export function renderFrame({ updateControls = true } = {}) {
+  if (!renderer || !camera) return;
+  if (controls && updateControls) {
+    controls.update();
+  }
+  renderer.render(scene, camera);
+}
+
+export function setRenderLoopPaused(paused) {
+  renderLoopPaused = Boolean(paused);
+}
+
 // --- Render loop ---
 
 export function startRenderLoop() {
+  if (renderLoopStarted) return;
+  renderLoopStarted = true;
+
   function animate() {
     requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
+    if (renderLoopPaused) return;
+    renderFrame();
   }
   animate();
 }
 
 export function captureScreenshot() {
   // Render one frame with preserveDrawingBuffer behavior
-  renderer.render(scene, camera);
+  renderFrame({ updateControls: false });
   return renderer.domElement.toDataURL("image/png");
 }
 

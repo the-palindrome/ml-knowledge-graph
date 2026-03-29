@@ -1,0 +1,497 @@
+# Video Renderer Documentation
+
+This document covers the graph video rendering system end-to-end:
+
+- Browser-side timeline API (`window.graphVideo`)
+- Timeline script format
+- Every supported action and its arguments
+- Node action resolution rules
+- Node CLI renderer (`scripts/render-graph-video.mjs`)
+- Runtime behavior and validation rules
+
+## 1. Architecture
+
+The renderer has two parts:
+
+1. In-page timeline engine (`js/main.js`), exposed via `window.graphVideo`
+2. Node CLI driver (`scripts/render-graph-video.mjs`) that:
+   - launches Puppeteer
+   - opens the graph page
+   - injects and runs the timeline script
+   - seeks frame-by-frame
+   - captures PNGs
+   - stitches video with `ffmpeg`
+
+During scripted rendering, the page enters `video-render-mode`:
+
+- Top bar, settings shell, side panels, controls hint, and toast are hidden
+- Tooltip transitions are disabled for deterministic frames
+- Camera updates run in deterministic mode
+
+## 2. Browser API (`window.graphVideo`)
+
+## Methods
+
+### `await window.graphVideo.runScript(script)`
+
+Loads and validates a timeline script, switches to deterministic render mode, and seeks to `t=0`.
+
+- `script`: either
+  - an array of action objects
+  - a JSON string encoding an array of action objects
+
+Returns:
+
+```json
+{
+  "duration": 13.3,
+  "actionCount": 10
+}
+```
+
+### `await window.graphVideo.seek(t)`
+
+Seeks the timeline to exact time `t` (seconds), recomputes the full state deterministically, and renders one frame.
+
+- `t`: number (seconds), clamped to `[0, duration]`
+
+Returns:
+
+```json
+{
+  "time": 4.5,
+  "duration": 13.3,
+  "selectedNodeIds": ["..."],
+  "visibilityMode": "context"
+}
+```
+
+### `await window.graphVideo.captureFrame()`
+
+Captures current frame and returns a PNG data URL.
+
+Return format:
+
+```text
+data:image/png;base64,...
+```
+
+### `window.graphVideo.getDuration()`
+
+Returns numeric timeline duration in seconds.
+
+## 3. Timeline Script Format
+
+A timeline script is an array of action objects:
+
+```json
+[
+  { "at": 0.0, "action": "focusNode", "nodeId": "gradient-descent" },
+  { "at": 1.0, "action": "autoRotate", "axis": "y", "speed": 0.25, "duration": 4.0 }
+]
+```
+
+## Common fields
+
+- `at` (number): action start time in seconds
+  - negative values are clamped to `0`
+- `action` (string): action name (canonical or alias)
+- `duration` (number):
+  - non-camera actions default to `0`
+  - camera actions default to smooth non-zero durations
+  - camera actions require `duration > 0`
+
+## Camera overlap rule
+
+Camera actions may **not overlap in time**. If a camera action starts before the previous camera action ends, validation fails.
+
+Camera actions are:
+
+- `focusNode`
+- `cameraFocus`
+- `moveCamera`
+- `orbit`
+- `autoRotate`
+- `zoomTo`
+
+## 4. Node Reference Resolution
+
+Whenever an action uses a node identifier field (`nodeId`, `targetNodeId`, etc.), values are resolved in this order:
+
+1. exact internal node ID
+2. case-insensitive full label
+3. slugified label (e.g. `gradient-descent`)
+
+If resolution fails, the script is rejected.
+
+## 5. Vector (`vec3`) Argument Format
+
+Fields that expect vectors accept either:
+
+- object: `{ "x": 0, "y": 10, "z": 200 }`
+- array: `[0, 10, 200]`
+
+All components must be finite numbers.
+
+## 6. Easing
+
+Camera actions support `easing`:
+
+- `smooth` (default)
+- `linear`
+- `ease-in`
+- `ease-out`
+- `ease-in-out`
+
+If omitted, easing defaults to `smooth`.
+
+## 7. Actions Reference
+
+This section lists **all canonical actions** and all accepted alias names.
+
+## 7.1 Selection and Context
+
+### `selectNode`
+Selects a node and applies contextual fade/highlighting.
+
+Required:
+
+- `nodeId` (string)
+
+Optional:
+
+- `appendToSelection` (boolean): append instead of replacing selection
+- `append` (boolean): alias of `appendToSelection`
+- `showPrerequisites` (boolean)
+- `highlightPrerequisites` (boolean): alias of `showPrerequisites`
+- `showDependents` (boolean)
+- `highlightDependents` (boolean): alias of `showDependents`
+- `at`, `duration` (duration generally unused for this action)
+
+Aliases:
+
+- `select` -> `selectNode`
+
+### `unselectNode`
+Removes a selected node, or clears all selection.
+
+Optional:
+
+- `nodeId` (string): if set, remove only this node from selection
+- without `nodeId`: clear all selections
+- `at`, `duration`
+
+Aliases:
+
+- `unselect` -> `unselectNode`
+
+### `focusNode`
+Selection + camera focus in one action.
+
+Required:
+
+- `nodeId` (string)
+
+Optional:
+
+- all selection options from `selectNode`
+- `duration` (default `1.2`)
+- `easing` (default `smooth`)
+- `distance` (number > 0): optional camera distance from focused target
+
+## 7.2 Camera-Only Actions
+
+### `cameraFocus`
+Moves camera focus smoothly without changing selection.
+
+Required (at least one targeting mode):
+
+- `nodeId` (string), or
+- `targetNodeId` (string), or
+- `focusNodeId` (string), or
+- `target` / `lookAt` / `point` (vec3)
+
+Optional:
+
+- `distance` (number > 0)
+- `duration` (default `1.2`)
+- `easing` (default `smooth`)
+- `at`
+
+Aliases:
+
+- `focus` -> `cameraFocus`
+- `focusCamera` -> `cameraFocus`
+
+### `moveCamera`
+Moves camera position/target using absolute coordinates and/or deltas.
+
+Must provide at least one of the following:
+
+- `position` / `to` / `cameraPosition` (vec3)
+- `delta` / `offset` / `moveBy` (vec3)
+- `target` / `lookAt` / `cameraTarget` (vec3)
+- `targetDelta` / `lookAtDelta` (vec3)
+- `targetNodeId` / `lookAtNodeId` (string)
+
+Optional:
+
+- `duration` (default `1.2`)
+- `easing` (default `smooth`)
+- `at`
+
+Aliases:
+
+- `move` -> `moveCamera`
+- `cameraMove` -> `moveCamera`
+
+### `orbit`
+Rotates camera around current target (or optional pivot).
+
+Optional:
+
+- `axis` (`"x" | "y" | "z"`, default `"y"`)
+- `speed` (number, turns-per-second equivalent in script semantics)
+  - default for `orbit`: `0` (set this explicitly to rotate)
+- `pivot` (vec3)
+- `pivotNodeId` (string)
+- `targetNodeId` (string): accepted as pivot node alias
+- `duration` (default `4.0`)
+- `easing` (default `smooth`)
+- `at`
+
+### `autoRotate`
+Like `orbit`, but with a non-zero default rotation speed.
+
+Optional:
+
+- `axis` (`"x" | "y" | "z"`, default `"y"`)
+- `speed` (number, default `0.2`)
+- `pivot` (vec3)
+- `pivotNodeId` (string)
+- `targetNodeId` (string): accepted as pivot node alias
+- `duration` (default `4.0`)
+- `easing` (default `smooth`)
+- `at`
+
+Aliases:
+
+- `rotateCamera` -> `autoRotate`
+
+### `zoomTo`
+Moves camera position along current view direction to a target distance.
+
+Required:
+
+- `distance` (number > 0)
+
+Optional:
+
+- `duration` (default `1.2`)
+- `easing` (default `smooth`)
+- `at`
+
+## 7.3 Graph Visibility Actions
+
+### `hideGraph`
+Sets node and edge opacity to zero.
+
+Optional:
+
+- `at`, `duration`
+
+### `fadeGraph`
+Applies context mode visual treatment (selected + prerequisite/dependent emphasis if any selection exists).
+
+Optional:
+
+- `at`, `duration`
+
+### `revealGraph`
+Restores ambient graph style (fully visible graph).
+
+Optional:
+
+- `at`, `duration`
+
+## 7.4 Relationship Emphasis
+
+### `highlightNeighbors`
+Selects a node and enables both prerequisite and dependent highlighting.
+
+Required:
+
+- `nodeId` (string)
+
+Optional:
+
+- selection options from `selectNode` (e.g., `append`, `appendToSelection`)
+- `at`, `duration`
+
+## 7.5 Tooltip / Label Actions
+
+### `openTooltip`
+Opens tooltip anchored to a node and sets tooltip opacity.
+
+Required:
+
+- `nodeId` (string)
+
+Optional:
+
+- `opacity` (number in `[0,1]`, default `1`)
+- `duration` (enables fade over time)
+- `at`
+
+Aliases:
+
+- `openNodeTooltip` -> `openTooltip`
+
+### `closeTooltip`
+Closes tooltip by fading opacity to zero.
+
+Optional:
+
+- `nodeId` (string): if provided, that node is considered current tooltip source during fade
+- `duration` (default `0`)
+- `at`
+
+Aliases:
+
+- `closeNodeTooltip` -> `closeTooltip`
+
+### `fadeLabel`
+Fades tooltip opacity to target value; can also retarget tooltip to a node first.
+
+Required:
+
+- `nodeId` (string)
+
+Optional:
+
+- `opacity` (number in `[0,1]`, default `1`)
+- `duration` (default `0`)
+- `at`
+
+## 8. Action Name Summary
+
+Canonical actions:
+
+- `selectNode`
+- `unselectNode`
+- `focusNode`
+- `cameraFocus`
+- `moveCamera`
+- `highlightNeighbors`
+- `hideGraph`
+- `fadeGraph`
+- `revealGraph`
+- `openTooltip`
+- `closeTooltip`
+- `fadeLabel`
+- `orbit`
+- `autoRotate`
+- `zoomTo`
+
+Accepted aliases:
+
+- `select` -> `selectNode`
+- `unselect` -> `unselectNode`
+- `focus` -> `cameraFocus`
+- `focusCamera` -> `cameraFocus`
+- `move` -> `moveCamera`
+- `cameraMove` -> `moveCamera`
+- `rotateCamera` -> `autoRotate`
+- `openNodeTooltip` -> `openTooltip`
+- `closeNodeTooltip` -> `closeTooltip`
+
+## 9. CLI Renderer (`scripts/render-graph-video.mjs`)
+
+## Usage
+
+```bash
+node scripts/render-graph-video.mjs --script ./scripts/video-script.example.json [options]
+```
+
+## Required
+
+- `--script, -s <path>`: path to JSON timeline script
+
+## Options
+
+- `--output, -o <path>`: output video path (default `./tmp/graph-video.mp4`)
+- `--fps <number>`: frame rate (default `30`)
+- `--width <number>`: viewport width (default `1920`)
+- `--height <number>`: viewport height (default `1080`)
+- `--url <http(s)://...>`: use external/already-running page URL (skips local static server)
+- `--frames-dir <path>`: custom directory for PNG frames
+- `--keep-frames`: keep PNGs after ffmpeg encode
+- `--verbose, -v`: enable detailed diagnostics
+- `--help, -h`: print usage
+
+## Runtime behavior
+
+- Validates `fps/width/height` are positive numbers
+- Ensures `ffmpeg` is in `PATH`
+- Loads Puppeteer dynamically
+- Uses a local static server when `--url` is not provided
+- Launches Chromium with WebGL-friendly flags:
+  - `--disable-dev-shm-usage`
+  - `--ignore-gpu-blocklist`
+  - `--use-angle=swiftshader`
+  - `--enable-unsafe-swiftshader`
+- If Chromium sandbox startup fails, retries with:
+  - `--no-sandbox`
+  - `--disable-setuid-sandbox`
+- Navigates using `domcontentloaded` and waits for `window.graphVideo`
+- Captures one PNG per frame as `frame-000000.png`, `frame-000001.png`, ...
+- Encodes with ffmpeg (`libx264`, `yuv420p`, `+faststart`)
+
+## ffmpeg command shape
+
+```bash
+ffmpeg -y \
+  -framerate <fps> \
+  -start_number 0 \
+  -i <framesDir>/frame-%06d.png \
+  -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \
+  -c:v libx264 \
+  -pix_fmt yuv420p \
+  -movflags +faststart \
+  <output>
+```
+
+## 10. Validation and Error Rules
+
+Common script validation failures:
+
+- action is not an object
+- unsupported `action` name
+- unknown node reference
+- invalid vec3 format or non-finite coordinates
+- camera action with `duration <= 0`
+- invalid `axis`
+- missing required arguments for action
+- overlapping camera actions in timeline
+
+Renderer runtime failures:
+
+- missing `ffmpeg`
+- missing `puppeteer`
+- page navigation timeout
+- `window.graphVideo` readiness timeout
+- zero PNG frames generated
+- ffmpeg encode failure
+
+## 11. Example Script
+
+See:
+
+- `scripts/video-script.example.json`
+
+It demonstrates:
+
+- selection + context (`focusNode`)
+- camera motion (`moveCamera`, `autoRotate`, `cameraFocus`, `zoomTo`)
+- tooltip control (`openTooltip`, `fadeLabel`, `closeTooltip`)
+- visibility control (`hideGraph`, `revealGraph`, `fadeGraph`)

@@ -56,6 +56,50 @@ const METRIC_NODE_SCALE_MIN_FACTOR = 0.75;
 const METRIC_NODE_SCALE_MAX_FACTOR = 1.9;
 const TOOLTIP_MARGIN = 14;
 const TOOLTIP_MIN_WIDTH = 120;
+const VIDEO_DURATION_EPSILON = 1e-6;
+const VIDEO_ORBIT_TURN_TO_RADIANS = Math.PI * 2;
+const VIDEO_TOOLTIP_HIDDEN_OPACITY = 0.001;
+const VIDEO_DEFAULT_CAMERA_DURATION = 1.2;
+const VIDEO_DEFAULT_ORBIT_DURATION = 4.0;
+const VIDEO_DEFAULT_AUTO_ROTATE_SPEED = 0.2;
+const VIDEO_CAMERA_EASING_MODES = new Set([
+  'smooth',
+  'linear',
+  'ease-in',
+  'ease-out',
+  'ease-in-out',
+]);
+const VIDEO_GRAPH_VISIBILITY = {
+  CONTEXT: 'context',
+  REVEALED: 'revealed',
+  HIDDEN: 'hidden',
+};
+const VIDEO_SUPPORTED_ACTIONS = new Set([
+  'selectNode',
+  'select',
+  'unselectNode',
+  'unselect',
+  'focusNode',
+  'focus',
+  'cameraFocus',
+  'focusCamera',
+  'moveCamera',
+  'cameraMove',
+  'move',
+  'highlightNeighbors',
+  'hideGraph',
+  'fadeGraph',
+  'revealGraph',
+  'openTooltip',
+  'openNodeTooltip',
+  'closeTooltip',
+  'closeNodeTooltip',
+  'fadeLabel',
+  'orbit',
+  'autoRotate',
+  'rotateCamera',
+  'zoomTo',
+]);
 
 const pathHighlightState = {
   showPrerequisites: true,
@@ -69,6 +113,14 @@ let defaultNodeScaleRange = {
   min: DEFAULT_NODE_SCALE_FALLBACK_MIN,
   max: DEFAULT_NODE_SCALE_FALLBACK_MAX,
 };
+const videoTimelineState = {
+  actions: [],
+  duration: 0,
+  baseCameraState: null,
+  active: false,
+  currentTime: 0,
+};
+let videoNodeLookupMap = null;
 
 window.addEventListener('resize', () => {
   if (!hoveredNodeId) return;
@@ -448,6 +500,7 @@ function handleHover(nodeId, screenX, screenY) {
     positionHoverTooltip(screenX, screenY);
     tooltip.classList.add('visible');
     tooltip.setAttribute('aria-hidden', 'false');
+    tooltip.style.opacity = '';
 
     if (!hasActiveSelection()) {
       node._hoverRestoreScale = node._currentScale;
@@ -459,6 +512,7 @@ function handleHover(nodeId, screenX, screenY) {
   } else {
     tooltip.classList.remove('visible');
     tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.opacity = '';
     if (!hasActiveSelection()) Renderer.updatePositions();
     container.style.cursor = 'default';
   }
@@ -860,5 +914,890 @@ function handleCategoryClick(category) {
   handleSearch(category);
 }
 
+function toFiniteNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clampNonNegative(value, fallback = 0) {
+  return Math.max(0, toFiniteNumber(value, fallback));
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, toFiniteNumber(value, 0)));
+}
+
+function cloneVec3(vec) {
+  return {
+    x: toFiniteNumber(vec?.x, 0),
+    y: toFiniteNumber(vec?.y, 0),
+    z: toFiniteNumber(vec?.z, 0),
+  };
+}
+
+function addVec3(a, b) {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+function subtractVec3(a, b) {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+function scaleVec3(v, scalar) {
+  return { x: v.x * scalar, y: v.y * scalar, z: v.z * scalar };
+}
+
+function vec3Length(v) {
+  return Math.sqrt((v.x * v.x) + (v.y * v.y) + (v.z * v.z));
+}
+
+function normalizeVec3(v, fallback = { x: 0, y: 0, z: 1 }) {
+  const length = vec3Length(v);
+  if (length < 1e-9) return cloneVec3(fallback);
+  return scaleVec3(v, 1 / length);
+}
+
+function lerpScalar(start, end, progress) {
+  return start + ((end - start) * progress);
+}
+
+function lerpVec3(start, end, progress) {
+  return {
+    x: lerpScalar(start.x, end.x, progress),
+    y: lerpScalar(start.y, end.y, progress),
+    z: lerpScalar(start.z, end.z, progress),
+  };
+}
+
+function rotateVec3ByAxis(v, axis, angleRad) {
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+
+  switch (axis) {
+    case 'x':
+      return {
+        x: v.x,
+        y: (v.y * cos) - (v.z * sin),
+        z: (v.y * sin) + (v.z * cos),
+      };
+    case 'z':
+      return {
+        x: (v.x * cos) - (v.y * sin),
+        y: (v.x * sin) + (v.y * cos),
+        z: v.z,
+      };
+    case 'y':
+    default:
+      return {
+        x: (v.x * cos) + (v.z * sin),
+        y: v.y,
+        z: (-v.x * sin) + (v.z * cos),
+      };
+  }
+}
+
+function cloneCameraState(cameraState) {
+  if (!cameraState) return null;
+  return {
+    position: cloneVec3(cameraState.position),
+    target: cloneVec3(cameraState.target),
+  };
+}
+
+function parseVideoVec3(value, fieldName, actionName, index) {
+  if (value == null) return null;
+
+  let x;
+  let y;
+  let z;
+
+  if (Array.isArray(value)) {
+    if (value.length < 3) {
+      throw new Error(
+        `Action "${actionName}" at index ${index} has invalid ${fieldName}; expected [x, y, z].`,
+      );
+    }
+    [x, y, z] = value;
+  } else if (typeof value === 'object') {
+    x = value.x;
+    y = value.y;
+    z = value.z;
+  } else {
+    throw new Error(
+      `Action "${actionName}" at index ${index} has invalid ${fieldName}; expected vec3 object.`,
+    );
+  }
+
+  const normalized = {
+    x: Number(x),
+    y: Number(y),
+    z: Number(z),
+  };
+
+  if (!Number.isFinite(normalized.x)
+    || !Number.isFinite(normalized.y)
+    || !Number.isFinite(normalized.z)) {
+    throw new Error(
+      `Action "${actionName}" at index ${index} has non-finite ${fieldName} coordinates.`,
+    );
+  }
+
+  return normalized;
+}
+
+function getVideoCameraDefaultDuration(actionName) {
+  if (actionName === 'orbit' || actionName === 'autoRotate') {
+    return VIDEO_DEFAULT_ORBIT_DURATION;
+  }
+  return VIDEO_DEFAULT_CAMERA_DURATION;
+}
+
+function normalizeVideoCameraEasing(rawEasing, actionName, index) {
+  if (rawEasing == null) return 'smooth';
+  const easing = String(rawEasing).trim().toLowerCase();
+  if (!VIDEO_CAMERA_EASING_MODES.has(easing)) {
+    throw new Error(
+      `Action "${actionName}" at index ${index} has unsupported easing "${rawEasing}".`,
+    );
+  }
+  return easing;
+}
+
+function easeVideoProgress(progress, easing) {
+  const t = clamp01(progress);
+  switch (easing) {
+    case 'linear':
+      return t;
+    case 'ease-in':
+      return t * t * t;
+    case 'ease-out':
+      return 1 - ((1 - t) * (1 - t) * (1 - t));
+    case 'ease-in-out':
+      if (t < 0.5) return 4 * t * t * t;
+      return 1 - (Math.pow(-2 * t + 2, 3) / 2);
+    case 'smooth':
+    default:
+      return t * t * (3 - (2 * t));
+  }
+}
+
+function toVideoNodeSlug(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildVideoNodeLookupMap() {
+  if (videoNodeLookupMap) return videoNodeLookupMap;
+  videoNodeLookupMap = new Map();
+  for (const node of graph.nodes) {
+    const idKey = String(node.id).trim().toLowerCase();
+    if (idKey) videoNodeLookupMap.set(idKey, node.id);
+
+    const labelKey = String(node.label ?? '').trim().toLowerCase();
+    if (labelKey && !videoNodeLookupMap.has(labelKey)) {
+      videoNodeLookupMap.set(labelKey, node.id);
+    }
+
+    const slugKey = toVideoNodeSlug(node.label);
+    if (slugKey && !videoNodeLookupMap.has(slugKey)) {
+      videoNodeLookupMap.set(slugKey, node.id);
+    }
+  }
+  return videoNodeLookupMap;
+}
+
+function resolveVideoNodeId(nodeRef) {
+  if (typeof nodeRef !== 'string' || nodeRef.trim().length === 0) return null;
+  const trimmed = nodeRef.trim();
+  if (graph.nodeMap.has(trimmed)) return trimmed;
+
+  const lookup = buildVideoNodeLookupMap();
+  const lowerKey = trimmed.toLowerCase();
+  const direct = lookup.get(lowerKey);
+  if (direct) return direct;
+
+  const slug = toVideoNodeSlug(trimmed);
+  return lookup.get(slug) ?? null;
+}
+
+function canonicalVideoActionName(actionName) {
+  switch (actionName) {
+    case 'select':
+      return 'selectNode';
+    case 'unselect':
+      return 'unselectNode';
+    case 'focus':
+    case 'focusCamera':
+      return 'cameraFocus';
+    case 'cameraMove':
+    case 'move':
+      return 'moveCamera';
+    case 'rotateCamera':
+      return 'autoRotate';
+    case 'openNodeTooltip':
+      return 'openTooltip';
+    case 'closeNodeTooltip':
+      return 'closeTooltip';
+    default:
+      return actionName;
+  }
+}
+
+function parseVideoScriptInput(scriptInput) {
+  if (Array.isArray(scriptInput)) return scriptInput;
+  if (typeof scriptInput === 'string') {
+    const parsed = JSON.parse(scriptInput);
+    if (!Array.isArray(parsed)) {
+      throw new Error('Video script string must decode to an array of actions.');
+    }
+    return parsed;
+  }
+  throw new Error('Video script must be an array or JSON string.');
+}
+
+function actionRequiresNodeId(actionName) {
+  return actionName === 'selectNode'
+    || actionName === 'focusNode'
+    || actionName === 'highlightNeighbors'
+    || actionName === 'openTooltip'
+    || actionName === 'fadeLabel';
+}
+
+function isCameraTimelineAction(actionName) {
+  return actionName === 'focusNode'
+    || actionName === 'cameraFocus'
+    || actionName === 'moveCamera'
+    || actionName === 'orbit'
+    || actionName === 'autoRotate'
+    || actionName === 'zoomTo';
+}
+
+function normalizeVideoAction(rawAction, index) {
+  if (!rawAction || typeof rawAction !== 'object' || Array.isArray(rawAction)) {
+    throw new Error(`Action at index ${index} must be an object.`);
+  }
+
+  const declaredActionName = String(rawAction.action ?? '').trim();
+  const actionName = canonicalVideoActionName(declaredActionName);
+  if (!VIDEO_SUPPORTED_ACTIONS.has(actionName)) {
+    throw new Error(`Unsupported video action "${declaredActionName}" at index ${index}.`);
+  }
+
+  const isCameraAction = isCameraTimelineAction(actionName);
+  const hasExplicitDuration = rawAction.duration != null;
+  let duration = isCameraAction ? getVideoCameraDefaultDuration(actionName) : 0;
+  if (hasExplicitDuration) {
+    const parsedDuration = Number(rawAction.duration);
+    if (!Number.isFinite(parsedDuration) || parsedDuration < 0) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} has invalid duration.`);
+    }
+    duration = parsedDuration;
+  }
+
+  const normalized = {
+    ...rawAction,
+    action: actionName,
+    at: clampNonNegative(rawAction.at, 0),
+    duration,
+    _index: index,
+  };
+
+  if ('nodeId' in rawAction) {
+    if (typeof rawAction.nodeId !== 'string' || rawAction.nodeId.trim().length === 0) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} has an invalid nodeId.`);
+    }
+    normalized.nodeId = resolveVideoNodeId(rawAction.nodeId);
+  }
+
+  if (actionRequiresNodeId(actionName) && !normalized.nodeId) {
+    throw new Error(`Action "${declaredActionName}" at index ${index} requires a nodeId.`);
+  }
+  if ('nodeId' in rawAction && !normalized.nodeId) {
+    throw new Error(
+      `Action "${declaredActionName}" at index ${index} references unknown node "${rawAction.nodeId}".`,
+    );
+  }
+
+  if (isCameraAction) {
+    normalized.easing = normalizeVideoCameraEasing(rawAction.easing, declaredActionName, index);
+    if (normalized.duration <= 0) {
+      throw new Error(
+        `Action "${declaredActionName}" at index ${index} requires duration > 0 for smooth camera movement.`,
+      );
+    }
+  }
+
+  if (actionName === 'orbit' || actionName === 'autoRotate') {
+    const axis = String(rawAction.axis ?? 'y').toLowerCase();
+    if (axis !== 'x' && axis !== 'y' && axis !== 'z') {
+      throw new Error(`Action "${declaredActionName}" at index ${index} has invalid axis "${rawAction.axis}".`);
+    }
+    normalized.axis = axis;
+    const defaultSpeed = actionName === 'autoRotate' ? VIDEO_DEFAULT_AUTO_ROTATE_SPEED : 0;
+    normalized.speed = toFiniteNumber(rawAction.speed, defaultSpeed);
+
+    const pivot = parseVideoVec3(rawAction.pivot, 'pivot', declaredActionName, index);
+    let pivotNodeId = null;
+    const pivotNodeRef = rawAction.pivotNodeId ?? rawAction.targetNodeId;
+    if (pivotNodeRef != null) {
+      if (typeof pivotNodeRef !== 'string' || pivotNodeRef.trim().length === 0) {
+        throw new Error(`Action "${declaredActionName}" at index ${index} has invalid pivotNodeId.`);
+      }
+      pivotNodeId = resolveVideoNodeId(pivotNodeRef);
+      if (!pivotNodeId) {
+        throw new Error(
+          `Action "${declaredActionName}" at index ${index} references unknown pivot node "${pivotNodeRef}".`,
+        );
+      }
+    }
+    normalized._cameraPivot = pivot;
+    normalized._cameraPivotNodeId = pivotNodeId;
+  }
+
+  if (actionName === 'zoomTo') {
+    const distance = toFiniteNumber(rawAction.distance, Number.NaN);
+    if (!Number.isFinite(distance) || distance <= 0) {
+      throw new Error(`Action "zoomTo" at index ${index} must provide a positive distance.`);
+    }
+    normalized.distance = distance;
+  }
+
+  if (actionName === 'cameraFocus') {
+    const focusTarget = parseVideoVec3(
+      rawAction.target ?? rawAction.lookAt ?? rawAction.point,
+      'target',
+      declaredActionName,
+      index,
+    );
+    let focusNodeId = normalized.nodeId ?? null;
+    const focusNodeRef = rawAction.targetNodeId ?? rawAction.focusNodeId;
+    if (!focusNodeId && focusNodeRef != null) {
+      if (typeof focusNodeRef !== 'string' || focusNodeRef.trim().length === 0) {
+        throw new Error(`Action "${declaredActionName}" at index ${index} has invalid targetNodeId.`);
+      }
+      focusNodeId = resolveVideoNodeId(focusNodeRef);
+      if (!focusNodeId) {
+        throw new Error(
+          `Action "${declaredActionName}" at index ${index} references unknown target node "${focusNodeRef}".`,
+        );
+      }
+    }
+    if (!focusNodeId && !focusTarget) {
+      throw new Error(
+        `Action "${declaredActionName}" at index ${index} requires nodeId/targetNodeId or target coordinates.`,
+      );
+    }
+
+    normalized._cameraFocusNodeId = focusNodeId;
+    normalized._cameraFocusTarget = focusTarget;
+
+    if (rawAction.distance != null) {
+      const distance = Number(rawAction.distance);
+      if (!Number.isFinite(distance) || distance <= 0) {
+        throw new Error(
+          `Action "${declaredActionName}" at index ${index} has invalid distance.`,
+        );
+      }
+      normalized.distance = distance;
+    }
+  }
+
+  if (actionName === 'moveCamera') {
+    const absolutePosition = parseVideoVec3(
+      rawAction.position ?? rawAction.to ?? rawAction.cameraPosition,
+      'position',
+      declaredActionName,
+      index,
+    );
+    const positionDelta = parseVideoVec3(
+      rawAction.delta ?? rawAction.offset ?? rawAction.moveBy,
+      'delta',
+      declaredActionName,
+      index,
+    );
+    const absoluteTarget = parseVideoVec3(
+      rawAction.target ?? rawAction.lookAt ?? rawAction.cameraTarget,
+      'target',
+      declaredActionName,
+      index,
+    );
+    const targetDelta = parseVideoVec3(
+      rawAction.targetDelta ?? rawAction.lookAtDelta,
+      'targetDelta',
+      declaredActionName,
+      index,
+    );
+
+    let targetNodeId = null;
+    const targetNodeRef = rawAction.targetNodeId ?? rawAction.lookAtNodeId;
+    if (targetNodeRef != null) {
+      if (typeof targetNodeRef !== 'string' || targetNodeRef.trim().length === 0) {
+        throw new Error(`Action "${declaredActionName}" at index ${index} has invalid targetNodeId.`);
+      }
+      targetNodeId = resolveVideoNodeId(targetNodeRef);
+      if (!targetNodeId) {
+        throw new Error(
+          `Action "${declaredActionName}" at index ${index} references unknown target node "${targetNodeRef}".`,
+        );
+      }
+    }
+
+    if (!absolutePosition && !positionDelta && !absoluteTarget && !targetDelta && !targetNodeId) {
+      throw new Error(
+        `Action "${declaredActionName}" at index ${index} requires position/delta/target information.`,
+      );
+    }
+
+    normalized._cameraMovePosition = absolutePosition;
+    normalized._cameraMoveDelta = positionDelta;
+    normalized._cameraMoveTarget = absoluteTarget;
+    normalized._cameraMoveTargetDelta = targetDelta;
+    normalized._cameraMoveTargetNodeId = targetNodeId;
+  }
+
+  if (actionName === 'openTooltip' || actionName === 'fadeLabel') {
+    normalized.opacity = clamp01(rawAction.opacity ?? 1);
+  }
+
+  if (actionName === 'closeTooltip') {
+    normalized.opacity = 0;
+  }
+
+  return normalized;
+}
+
+function normalizeVideoScript(scriptInput) {
+  const script = parseVideoScriptInput(scriptInput);
+  const actions = script
+    .map((rawAction, index) => normalizeVideoAction(rawAction, index))
+    .sort((a, b) => {
+      if (a.at !== b.at) return a.at - b.at;
+      return a._index - b._index;
+    });
+
+  let activeCameraAnimationEnd = -Infinity;
+  for (const action of actions) {
+    if (!isCameraTimelineAction(action.action) || action.duration <= 0) continue;
+    if (action.at + VIDEO_DURATION_EPSILON < activeCameraAnimationEnd) {
+      throw new Error(
+        `Camera action "${action.action}" at t=${action.at} overlaps a previous camera action.`
+          + ' Overlapping camera actions are not supported.',
+      );
+    }
+    activeCameraAnimationEnd = action.at + action.duration;
+  }
+
+  return actions;
+}
+
+function computeVideoScriptDuration(actions) {
+  return actions.reduce(
+    (maxDuration, action) => Math.max(maxDuration, action.at + action.duration),
+    0,
+  );
+}
+
+function createInitialVideoSeekState() {
+  const fallbackCameraState = Renderer.getCameraState();
+  return {
+    visibilityMode: VIDEO_GRAPH_VISIBILITY.REVEALED,
+    selectedNodeIds: new Set(),
+    focusNodeId: null,
+    showPrerequisites: true,
+    showDependents: false,
+    tooltipNodeId: null,
+    tooltipOpacity: 1,
+    cameraState: cloneCameraState(videoTimelineState.baseCameraState ?? fallbackCameraState),
+  };
+}
+
+function applyVideoSelectState(state, action) {
+  const shouldAppend = Boolean(action.appendToSelection ?? action.append ?? false);
+  if (!shouldAppend) {
+    state.selectedNodeIds = new Set();
+  }
+  state.selectedNodeIds.add(action.nodeId);
+  state.focusNodeId = action.nodeId;
+  state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+
+  if (typeof action.showPrerequisites === 'boolean') {
+    state.showPrerequisites = action.showPrerequisites;
+  }
+  if (typeof action.highlightPrerequisites === 'boolean') {
+    state.showPrerequisites = action.highlightPrerequisites;
+  }
+  if (typeof action.showDependents === 'boolean') {
+    state.showDependents = action.showDependents;
+  }
+  if (typeof action.highlightDependents === 'boolean') {
+    state.showDependents = action.highlightDependents;
+  }
+}
+
+function getVideoNodePosition(nodeId) {
+  if (!nodeId) return null;
+  const node = graph.nodeMap.get(nodeId);
+  if (!node) return null;
+  return { x: node.x, y: node.y, z: node.z };
+}
+
+function applyVideoFocusCamera(state, action, progress) {
+  if (!state.cameraState) return;
+
+  const targetFromNode = getVideoNodePosition(action._cameraFocusNodeId ?? action.nodeId);
+  const targetFromPoint = action._cameraFocusTarget ? cloneVec3(action._cameraFocusTarget) : null;
+  const endTarget = targetFromNode ?? targetFromPoint;
+  if (!endTarget) return;
+
+  const startCamera = cloneCameraState(state.cameraState);
+  const startOffset = subtractVec3(startCamera.position, startCamera.target);
+  let endPosition = addVec3(endTarget, startOffset);
+
+  if (action.distance != null) {
+    const direction = normalizeVec3(startOffset, { x: 0, y: 0, z: 1 });
+    endPosition = addVec3(endTarget, scaleVec3(direction, action.distance));
+  }
+
+  const blendedTarget = lerpVec3(startCamera.target, endTarget, progress);
+  const blendedPosition = lerpVec3(startCamera.position, endPosition, progress);
+
+  state.cameraState = {
+    target: blendedTarget,
+    position: blendedPosition,
+  };
+}
+
+function applyVideoMoveCamera(state, action, progress) {
+  if (!state.cameraState) return;
+
+  const startCamera = cloneCameraState(state.cameraState);
+  let endPosition = cloneVec3(startCamera.position);
+  let endTarget = cloneVec3(startCamera.target);
+
+  if (action._cameraMovePosition) {
+    endPosition = cloneVec3(action._cameraMovePosition);
+  }
+  if (action._cameraMoveDelta) {
+    endPosition = addVec3(endPosition, action._cameraMoveDelta);
+  }
+
+  const targetFromNode = getVideoNodePosition(action._cameraMoveTargetNodeId);
+  if (targetFromNode) {
+    endTarget = targetFromNode;
+  }
+  if (action._cameraMoveTarget) {
+    endTarget = cloneVec3(action._cameraMoveTarget);
+  }
+  if (action._cameraMoveTargetDelta) {
+    endTarget = addVec3(endTarget, action._cameraMoveTargetDelta);
+  }
+
+  state.cameraState = {
+    target: lerpVec3(startCamera.target, endTarget, progress),
+    position: lerpVec3(startCamera.position, endPosition, progress),
+  };
+}
+
+function applyVideoOrbitCamera(state, action, elapsed, progress) {
+  if (!state.cameraState || elapsed <= 0) return;
+
+  const startCamera = cloneCameraState(state.cameraState);
+  const pivotFromNode = getVideoNodePosition(action._cameraPivotNodeId);
+  const pivotFromPoint = action._cameraPivot ? cloneVec3(action._cameraPivot) : null;
+  const pivotTarget = pivotFromNode ?? pivotFromPoint ?? startCamera.target;
+  const blendedTarget = lerpVec3(startCamera.target, pivotTarget, progress);
+
+  const angle = elapsed * action.speed * VIDEO_ORBIT_TURN_TO_RADIANS;
+  const baseOffset = subtractVec3(startCamera.position, startCamera.target);
+  const rotatedOffset = rotateVec3ByAxis(baseOffset, action.axis, angle);
+
+  state.cameraState = {
+    target: blendedTarget,
+    position: addVec3(blendedTarget, rotatedOffset),
+  };
+}
+
+function applyVideoZoomCamera(state, action, progress) {
+  if (!state.cameraState) return;
+
+  const startCamera = cloneCameraState(state.cameraState);
+  const cameraDirection = normalizeVec3(
+    subtractVec3(startCamera.position, startCamera.target),
+    { x: 0, y: 0, z: 1 },
+  );
+  const endPosition = addVec3(
+    startCamera.target,
+    scaleVec3(cameraDirection, action.distance),
+  );
+
+  state.cameraState = {
+    target: startCamera.target,
+    position: lerpVec3(startCamera.position, endPosition, progress),
+  };
+}
+
+function applyVideoTooltipFade(state, action, progress) {
+  if (action.nodeId) {
+    state.tooltipNodeId = action.nodeId;
+  }
+  const startOpacity = clamp01(state.tooltipOpacity);
+  const endOpacity = clamp01(action.opacity ?? 1);
+  state.tooltipOpacity = lerpScalar(startOpacity, endOpacity, progress);
+  if (progress >= 1 && endOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
+    state.tooltipNodeId = null;
+  }
+}
+
+function applyVideoActionAtTime(state, action, timelineTime) {
+  const elapsed = Math.max(0, timelineTime - action.at);
+  const hasDuration = action.duration > 0;
+  const progress = hasDuration ? Math.min(1, elapsed / action.duration) : 1;
+  const cameraProgress = isCameraTimelineAction(action.action)
+    ? easeVideoProgress(progress, action.easing)
+    : progress;
+  const effectiveElapsed = hasDuration ? action.duration * cameraProgress : 0;
+
+  switch (action.action) {
+    case 'selectNode':
+      applyVideoSelectState(state, action);
+      break;
+    case 'unselectNode':
+      if (action.nodeId) {
+        state.selectedNodeIds.delete(action.nodeId);
+      } else {
+        state.selectedNodeIds.clear();
+      }
+      if (!state.focusNodeId || !state.selectedNodeIds.has(state.focusNodeId)) {
+        state.focusNodeId = state.selectedNodeIds.values().next().value ?? null;
+      }
+      break;
+    case 'focusNode':
+      applyVideoSelectState(state, action);
+      applyVideoFocusCamera(state, action, cameraProgress);
+      break;
+    case 'cameraFocus':
+      applyVideoFocusCamera(state, action, cameraProgress);
+      break;
+    case 'moveCamera':
+      applyVideoMoveCamera(state, action, cameraProgress);
+      break;
+    case 'highlightNeighbors':
+      applyVideoSelectState(state, {
+        ...action,
+        showPrerequisites: true,
+        showDependents: true,
+      });
+      break;
+    case 'hideGraph':
+      state.visibilityMode = VIDEO_GRAPH_VISIBILITY.HIDDEN;
+      break;
+    case 'fadeGraph':
+      state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+      break;
+    case 'revealGraph':
+      state.visibilityMode = VIDEO_GRAPH_VISIBILITY.REVEALED;
+      break;
+    case 'openTooltip':
+      applyVideoTooltipFade(state, { ...action, opacity: action.opacity ?? 1 }, progress);
+      break;
+    case 'closeTooltip':
+      applyVideoTooltipFade(state, { ...action, opacity: 0 }, progress);
+      break;
+    case 'fadeLabel':
+      applyVideoTooltipFade(state, action, progress);
+      break;
+    case 'orbit':
+    case 'autoRotate':
+      applyVideoOrbitCamera(state, action, effectiveElapsed, cameraProgress);
+      break;
+    case 'zoomTo':
+      applyVideoZoomCamera(state, action, cameraProgress);
+      break;
+    default:
+      break;
+  }
+}
+
+function buildVideoSeekState(timelineTime) {
+  const state = createInitialVideoSeekState();
+  for (const action of videoTimelineState.actions) {
+    if (action.at - VIDEO_DURATION_EPSILON > timelineTime) break;
+    applyVideoActionAtTime(state, action, timelineTime);
+  }
+  return state;
+}
+
+function hideTooltipImmediately() {
+  tooltip.classList.remove('visible');
+  tooltip.setAttribute('aria-hidden', 'true');
+  tooltip.style.opacity = '';
+}
+
+function applyHiddenGraphStyle() {
+  const colorMap = new Map();
+  for (const n of graph.nodes) {
+    const baseColor = getNodeBaseColor(n);
+    colorMap.set(n.id, { ...baseColor, a: 0 });
+    n._currentScale = n._baseScale;
+    n._hoverRestoreScale = null;
+  }
+  Renderer.updateColors(colorMap);
+  Renderer.updatePositions();
+  Renderer.setEdgeOpacity(0);
+  Renderer.clearHighlightEdges();
+}
+
+function applyVideoTooltipState(nodeId, opacity = 1) {
+  if (!tooltip || !tooltipLabel || !graph) return;
+  const clampedOpacity = clamp01(opacity);
+  const node = nodeId ? graph.nodeMap.get(nodeId) : null;
+
+  if (!node || clampedOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
+    hideTooltipImmediately();
+    return;
+  }
+
+  const screenPos = Renderer.projectToScreen(node.id);
+  if (!screenPos || screenPos.behind) {
+    tooltip.classList.remove('visible');
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.opacity = `${clampedOpacity}`;
+    return;
+  }
+
+  tooltipLabel.textContent = node.label;
+  updateHoverTooltipGeometry();
+  positionHoverTooltip(screenPos.x, screenPos.y);
+  tooltip.classList.add('visible');
+  tooltip.setAttribute('aria-hidden', 'false');
+  tooltip.style.opacity = `${clampedOpacity}`;
+}
+
+function applyVideoSeekStateToScene(state, timelineTime) {
+  pathHighlightState.showPrerequisites = state.showPrerequisites;
+  pathHighlightState.showDependents = state.showDependents;
+  UI.setPathHighlightToggleState(pathHighlightState);
+
+  selectedNodeIds = new Set(state.selectedNodeIds);
+  selectedNodeId = selectedNodeIds.has(state.focusNodeId)
+    ? state.focusNodeId
+    : selectedNodeIds.values().next().value ?? null;
+  hoveredNodeId = null;
+  if (container) container.style.cursor = 'default';
+
+  if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.HIDDEN) {
+    applyHiddenGraphStyle();
+    UI.hideInfoPanel();
+    UI.setPathHighlightToggleEnabled(false);
+  } else if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.CONTEXT && selectedNodeIds.size > 0) {
+    UI.setPathHighlightToggleEnabled(true);
+    const selectionContext = getSelectionContext(selectedNodeIds);
+    selectedNodeIds = selectionContext.selectedNodeSet;
+    if (!selectedNodeId || !selectedNodeIds.has(selectedNodeId)) {
+      selectedNodeId = selectedNodeIds.values().next().value ?? null;
+    }
+    applySelectionHighlight(selectionContext, {
+      animateCamera: false,
+      focusNodeId: selectedNodeId,
+    });
+  } else {
+    applyAmbientGraphStyle();
+    UI.hideInfoPanel();
+    UI.setPathHighlightToggleEnabled(false);
+  }
+
+  if (state.cameraState) {
+    Renderer.setCameraState(state.cameraState);
+  }
+  applyVideoTooltipState(state.tooltipNodeId, state.tooltipOpacity);
+  Renderer.renderFrame({ updateControls: false });
+  videoTimelineState.currentTime = timelineTime;
+
+  return {
+    time: timelineTime,
+    duration: videoTimelineState.duration,
+    selectedNodeIds: [...selectedNodeIds],
+    visibilityMode: state.visibilityMode,
+  };
+}
+
+function enableVideoRenderMode() {
+  document.body.classList.add('video-render-mode');
+  Renderer.setAutoRotate(false);
+  Renderer.setDeterministicMode(true);
+  Renderer.setRenderLoopPaused(true);
+  hideTooltipImmediately();
+}
+
+async function runVideoScript(scriptInput) {
+  videoNodeLookupMap = null;
+  const actions = normalizeVideoScript(scriptInput);
+
+  videoTimelineState.actions = actions;
+  videoTimelineState.duration = computeVideoScriptDuration(actions);
+  videoTimelineState.baseCameraState = cloneCameraState(Renderer.getCameraState());
+  videoTimelineState.active = true;
+  videoTimelineState.currentTime = 0;
+
+  enableVideoRenderMode();
+  await seekVideoTimeline(0);
+
+  return {
+    duration: videoTimelineState.duration,
+    actionCount: videoTimelineState.actions.length,
+  };
+}
+
+async function seekVideoTimeline(timeSeconds) {
+  if (!videoTimelineState.active) {
+    throw new Error('No video script loaded. Call graphVideo.runScript(script) first.');
+  }
+
+  const requestedTime = clampNonNegative(timeSeconds, 0);
+  const clampedTime = Math.min(requestedTime, videoTimelineState.duration);
+  const nextState = buildVideoSeekState(clampedTime);
+  return applyVideoSeekStateToScene(nextState, clampedTime);
+}
+
+async function captureVideoFrame() {
+  if (!videoTimelineState.active) {
+    throw new Error('No video script loaded. Call graphVideo.runScript(script) first.');
+  }
+  return Renderer.captureScreenshot();
+}
+
+function installGraphVideoApi(initPromise) {
+  window.graphVideo = {
+    async runScript(script) {
+      await initPromise;
+      if (!graph) {
+        throw new Error('Graph failed to initialize. Cannot run video script.');
+      }
+      return runVideoScript(script);
+    },
+    async seek(t) {
+      await initPromise;
+      if (!graph) {
+        throw new Error('Graph failed to initialize. Cannot seek timeline.');
+      }
+      return seekVideoTimeline(t);
+    },
+    async captureFrame() {
+      await initPromise;
+      if (!graph) {
+        throw new Error('Graph failed to initialize. Cannot capture frame.');
+      }
+      return captureVideoFrame();
+    },
+    getDuration() {
+      return videoTimelineState.duration;
+    },
+  };
+}
+
 // --- Start ---
-init();
+const initPromise = init();
+installGraphVideoApi(initPromise);
