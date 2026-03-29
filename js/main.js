@@ -87,6 +87,8 @@ const VIDEO_SUPPORTED_ACTIONS = new Set([
   'cameraMove',
   'move',
   'highlightNeighbors',
+  'highlightDescendants',
+  'highlightDependencies',
   'hideGraph',
   'fadeGraph',
   'revealGraph',
@@ -347,6 +349,63 @@ function getSelectionContext(nodeIds = selectedNodeIds) {
 
     const downstream = getDownstream(nodeId, graph.nodeMap);
     for (const downstreamId of downstream) dependentSet.add(downstreamId);
+  }
+
+  return { selectedNodeSet, prerequisiteSet, dependentSet };
+}
+
+function getBoundedRelationSet(startNodeId, relationKey, maxLevel) {
+  const visited = new Set();
+  if (!graph || !graph.nodeMap.has(startNodeId)) return visited;
+
+  const levelLimit = Math.max(0, Math.floor(maxLevel));
+  const queue = [{ nodeId: startNodeId, depth: 0 }];
+  visited.add(startNodeId);
+
+  for (let q = 0; q < queue.length; q++) {
+    const current = queue[q];
+    if (current.depth >= levelLimit) continue;
+
+    const node = graph.nodeMap.get(current.nodeId);
+    if (!node) continue;
+
+    const neighborIds = node[relationKey];
+    if (!Array.isArray(neighborIds)) continue;
+    for (const neighborId of neighborIds) {
+      if (visited.has(neighborId) || !graph.nodeMap.has(neighborId)) continue;
+      visited.add(neighborId);
+      queue.push({ nodeId: neighborId, depth: current.depth + 1 });
+    }
+  }
+
+  return visited;
+}
+
+function buildVideoDirectionalSelectionContext(selectedIds, rootNodeId, relationKey, level) {
+  const selectedNodeSet = new Set();
+  const prerequisiteSet = new Set();
+  const dependentSet = new Set();
+
+  if (!graph) {
+    return { selectedNodeSet, prerequisiteSet, dependentSet };
+  }
+
+  for (const nodeId of selectedIds) {
+    if (graph.nodeMap.has(nodeId)) {
+      selectedNodeSet.add(nodeId);
+    }
+  }
+
+  for (const nodeId of selectedNodeSet) {
+    prerequisiteSet.add(nodeId);
+    dependentSet.add(nodeId);
+  }
+
+  const boundedRelationSet = getBoundedRelationSet(rootNodeId, relationKey, level);
+  if (relationKey === 'from') {
+    for (const nodeId of boundedRelationSet) prerequisiteSet.add(nodeId);
+  } else {
+    for (const nodeId of boundedRelationSet) dependentSet.add(nodeId);
   }
 
   return { selectedNodeSet, prerequisiteSet, dependentSet };
@@ -1045,6 +1104,16 @@ function parseVideoVec3(value, fieldName, actionName, index) {
   return normalized;
 }
 
+function parseVideoLevel(value, actionName, index) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(
+      `Action "${actionName}" at index ${index} has invalid level; expected a non-negative integer.`,
+    );
+  }
+  return parsed;
+}
+
 function getVideoCameraDefaultDuration(actionName) {
   if (actionName === 'orbit' || actionName === 'autoRotate') {
     return VIDEO_DEFAULT_ORBIT_DURATION;
@@ -1162,6 +1231,8 @@ function actionRequiresNodeId(actionName) {
   return actionName === 'selectNode'
     || actionName === 'focusNode'
     || actionName === 'highlightNeighbors'
+    || actionName === 'highlightDescendants'
+    || actionName === 'highlightDependencies'
     || actionName === 'openTooltip'
     || actionName === 'fadeLabel';
 }
@@ -1366,6 +1437,13 @@ function normalizeVideoAction(rawAction, index) {
     normalized.opacity = 0;
   }
 
+  if (actionName === 'highlightDescendants' || actionName === 'highlightDependencies') {
+    if (!('level' in rawAction)) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires a level.`);
+    }
+    normalized.level = parseVideoLevel(rawAction.level, declaredActionName, index);
+  }
+
   return normalized;
 }
 
@@ -1408,6 +1486,7 @@ function createInitialVideoSeekState() {
     focusNodeId: null,
     showPrerequisites: true,
     showDependents: false,
+    contextOverride: null,
     tooltipNodeId: null,
     tooltipOpacity: 1,
     cameraState: cloneCameraState(videoTimelineState.baseCameraState ?? fallbackCameraState),
@@ -1422,6 +1501,7 @@ function applyVideoSelectState(state, action) {
   state.selectedNodeIds.add(action.nodeId);
   state.focusNodeId = action.nodeId;
   state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+  state.contextOverride = null;
 
   if (typeof action.showPrerequisites === 'boolean') {
     state.showPrerequisites = action.showPrerequisites;
@@ -1435,6 +1515,22 @@ function applyVideoSelectState(state, action) {
   if (typeof action.highlightDependents === 'boolean') {
     state.showDependents = action.highlightDependents;
   }
+}
+
+function applyVideoDirectionalHighlightState(state, action, relationKey) {
+  const isDependencies = relationKey === 'from';
+  applyVideoSelectState(state, {
+    ...action,
+    showPrerequisites: isDependencies,
+    showDependents: !isDependencies,
+  });
+
+  state.contextOverride = buildVideoDirectionalSelectionContext(
+    state.selectedNodeIds,
+    action.nodeId,
+    relationKey,
+    action.level,
+  );
 }
 
 function getVideoNodePosition(nodeId) {
@@ -1565,6 +1661,7 @@ function applyVideoActionAtTime(state, action, timelineTime) {
       applyVideoSelectState(state, action);
       break;
     case 'unselectNode':
+      state.contextOverride = null;
       if (action.nodeId) {
         state.selectedNodeIds.delete(action.nodeId);
       } else {
@@ -1590,6 +1687,12 @@ function applyVideoActionAtTime(state, action, timelineTime) {
         showPrerequisites: true,
         showDependents: true,
       });
+      break;
+    case 'highlightDescendants':
+      applyVideoDirectionalHighlightState(state, action, 'to');
+      break;
+    case 'highlightDependencies':
+      applyVideoDirectionalHighlightState(state, action, 'from');
       break;
     case 'hideGraph':
       state.visibilityMode = VIDEO_GRAPH_VISIBILITY.HIDDEN;
@@ -1694,7 +1797,13 @@ function applyVideoSeekStateToScene(state, timelineTime) {
     UI.setPathHighlightToggleEnabled(false);
   } else if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.CONTEXT && selectedNodeIds.size > 0) {
     UI.setPathHighlightToggleEnabled(true);
-    const selectionContext = getSelectionContext(selectedNodeIds);
+    const selectionContext = state.contextOverride
+      ? {
+        selectedNodeSet: new Set(state.contextOverride.selectedNodeSet),
+        prerequisiteSet: new Set(state.contextOverride.prerequisiteSet),
+        dependentSet: new Set(state.contextOverride.dependentSet),
+      }
+      : getSelectionContext(selectedNodeIds);
     selectedNodeIds = selectionContext.selectedNodeSet;
     if (!selectedNodeId || !selectedNodeIds.has(selectedNodeId)) {
       selectedNodeId = selectedNodeIds.values().next().value ?? null;

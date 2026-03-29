@@ -328,6 +328,32 @@ Optional:
 - selection options from `selectNode` (e.g., `append`, `appendToSelection`)
 - `at`, `duration`
 
+### `highlightDescendants`
+Selects a node and highlights only descendants up to a maximum depth.
+
+Required:
+
+- `nodeId` (string)
+- `level` (non-negative integer): number of descendant levels to include (`0` = just the selected node)
+
+Optional:
+
+- selection options from `selectNode` (e.g., `append`, `appendToSelection`)
+- `at`, `duration`
+
+### `highlightDependencies`
+Selects a node and highlights only dependencies (prerequisites) up to a maximum depth.
+
+Required:
+
+- `nodeId` (string)
+- `level` (non-negative integer): number of dependency levels to include (`0` = just the selected node)
+
+Optional:
+
+- selection options from `selectNode` (e.g., `append`, `appendToSelection`)
+- `at`, `duration`
+
 ## 7.5 Tooltip / Label Actions
 
 ### `openTooltip`
@@ -383,6 +409,8 @@ Canonical actions:
 - `cameraFocus`
 - `moveCamera`
 - `highlightNeighbors`
+- `highlightDescendants`
+- `highlightDependencies`
 - `hideGraph`
 - `fadeGraph`
 - `revealGraph`
@@ -469,6 +497,7 @@ Common script validation failures:
 - unsupported `action` name
 - unknown node reference
 - invalid vec3 format or non-finite coordinates
+- invalid `level` (must be a non-negative integer)
 - camera action with `duration <= 0`
 - invalid `axis`
 - missing required arguments for action

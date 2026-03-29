@@ -48,6 +48,8 @@ Supported script actions:
 - `cameraFocus` (camera-only focus)
 - `moveCamera`
 - `highlightNeighbors` (prerequisites + dependents)
+- `highlightDescendants` (descendants up to `level`)
+- `highlightDependencies` (dependencies up to `level`)
 - `hideGraph` / `fadeGraph` / `revealGraph`
 - `openTooltip` / `closeTooltip` / `fadeLabel`
 - `orbit` / `autoRotate`
