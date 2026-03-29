@@ -102,6 +102,35 @@ const VIDEO_SUPPORTED_ACTIONS = new Set([
   'rotateCamera',
   'zoomTo',
 ]);
+const VIDEO_ACTION_ALIASES = new Map([
+  ['select', 'selectNode'],
+  ['unselect', 'unselectNode'],
+  ['focus', 'cameraFocus'],
+  ['focusCamera', 'cameraFocus'],
+  ['cameraMove', 'moveCamera'],
+  ['move', 'moveCamera'],
+  ['rotateCamera', 'autoRotate'],
+  ['openNodeTooltip', 'openTooltip'],
+  ['closeNodeTooltip', 'closeTooltip'],
+]);
+const VIDEO_ACTIONS_REQUIRING_NODE_ID = new Set([
+  'selectNode',
+  'focusNode',
+  'highlightNeighbors',
+  'highlightDescendants',
+  'highlightDependencies',
+  'openTooltip',
+  'fadeLabel',
+]);
+const VIDEO_CAMERA_TIMELINE_ACTIONS = new Set([
+  'focusNode',
+  'cameraFocus',
+  'moveCamera',
+  'orbit',
+  'autoRotate',
+  'zoomTo',
+]);
+const VIDEO_ORBIT_ACTIONS = new Set(['orbit', 'autoRotate']);
 
 const pathHighlightState = {
   showPrerequisites: true,
@@ -204,6 +233,38 @@ function applyPositions(positions) {
   for (const node of graph.nodes) {
     const pos = positions.get(node.id);
     if (pos) { node.x = pos.x; node.y = pos.y; node.z = pos.z; }
+  }
+}
+
+function getFirstSetValue(set) {
+  return set.values().next().value ?? null;
+}
+
+function syncSelectedNodeIdWithSelectionSet() {
+  if (!selectedNodeId || !selectedNodeIds.has(selectedNodeId)) {
+    selectedNodeId = getFirstSetValue(selectedNodeIds);
+  }
+}
+
+async function animateGraphToPositions(positions, duration = 900) {
+  Renderer.setAnimationPerformanceMode(true);
+  try {
+    let animationFrame = 0;
+    await animateToPositions(
+      graph.nodes,
+      positions,
+      ({ isFinalFrame }) => {
+        animationFrame += 1;
+        Renderer.updatePositions({
+          updateArrows: false,
+          updateEdges: isFinalFrame || animationFrame % 3 === 0,
+        });
+      },
+      duration,
+    );
+  } finally {
+    Renderer.setAnimationPerformanceMode(false);
+    Renderer.updatePositions();
   }
 }
 
@@ -447,18 +508,12 @@ function updateSelectionInfoPanel(selectionContext) {
   }
 
   if (selectedNodeSet.size === 1) {
-    const nodeId = selectedNodeSet.values().next().value;
+    const nodeId = getFirstSetValue(selectedNodeSet);
     const node = graph.nodeMap.get(nodeId);
     if (!node) return;
 
-    const directPrereqs = node.from
-      .map((id) => graph.nodeMap.get(id))
-      .filter(Boolean)
-      .sort((a, b) => a.label.localeCompare(b.label));
-    const directDeps = node.to
-      .map((id) => graph.nodeMap.get(id))
-      .filter(Boolean)
-      .sort((a, b) => a.label.localeCompare(b.label));
+    const directPrereqs = getSortedNodesByIds(node.from);
+    const directDeps = getSortedNodesByIds(node.to);
 
     UI.showInfoPanel(
       node,
@@ -499,9 +554,7 @@ function refreshCurrentVisualState() {
   const selectionContext = getSelectionContext();
   if (selectionContext.selectedNodeSet.size > 0) {
     selectedNodeIds = selectionContext.selectedNodeSet;
-    if (!selectedNodeId || !selectedNodeIds.has(selectedNodeId)) {
-      selectedNodeId = selectedNodeIds.values().next().value ?? null;
-    }
+    syncSelectedNodeIdWithSelectionSet();
     applySelectionHighlight(selectionContext, { animateCamera: false });
     return;
   }
@@ -569,9 +622,7 @@ function handleHover(nodeId, screenX, screenY) {
 
     container.style.cursor = 'pointer';
   } else {
-    tooltip.classList.remove('visible');
-    tooltip.setAttribute('aria-hidden', 'true');
-    tooltip.style.opacity = '';
+    hideTooltipImmediately();
     if (!hasActiveSelection()) Renderer.updatePositions();
     container.style.cursor = 'default';
   }
@@ -693,26 +744,11 @@ async function handleDblClick(nodeId) {
 
   const positions = computeRadialLayout(graph.nodes, nodeId, graph.nodeMap);
   isAnimating = true;
-  Renderer.setAnimationPerformanceMode(true);
   try {
-    let animationFrame = 0;
-    await animateToPositions(
-      graph.nodes,
-      positions,
-      ({ isFinalFrame }) => {
-        animationFrame += 1;
-        Renderer.updatePositions({
-          updateArrows: false,
-          updateEdges: isFinalFrame || animationFrame % 3 === 0,
-        });
-      },
-      900
-    );
+    await animateGraphToPositions(positions, 900);
   } finally {
-    Renderer.setAnimationPerformanceMode(false);
-    Renderer.updatePositions();
+    isAnimating = false;
   }
-  isAnimating = false;
 
   handleClick(nodeId, { animateCamera: false });
 }
@@ -724,8 +760,7 @@ function handleEmptyClick() {
   selectedNodeIds = new Set();
   hoveredNodeId = null;
   UI.updatePermalink(null);
-  tooltip.classList.remove('visible');
-  tooltip.setAttribute('aria-hidden', 'true');
+  hideTooltipImmediately();
   resetView();
   UI.hideInfoPanel();
   UI.setPathHighlightToggleEnabled(false);
@@ -799,15 +834,30 @@ function applySearchState(query, animateSingleMatchCamera) {
 }
 
 function applyAmbientGraphStyle() {
+  applyBaseGraphStyle({
+    nodeOpacity: 1,
+    edgeOpacity: BASE_EDGE_OPACITY,
+    updateNodePositions: false,
+  });
+}
+
+function applyBaseGraphStyle({
+  nodeOpacity,
+  edgeOpacity,
+  updateNodePositions,
+}) {
   const colorMap = new Map();
   for (const n of graph.nodes) {
     const baseColor = getNodeBaseColor(n);
-    colorMap.set(n.id, { ...baseColor, a: 1 });
+    colorMap.set(n.id, { ...baseColor, a: nodeOpacity });
     n._currentScale = n._baseScale;
     n._hoverRestoreScale = null;
   }
   Renderer.updateColors(colorMap);
-  Renderer.setEdgeOpacity(BASE_EDGE_OPACITY);
+  if (updateNodePositions) {
+    Renderer.updatePositions();
+  }
+  Renderer.setEdgeOpacity(edgeOpacity);
   Renderer.clearHighlightEdges();
 }
 
@@ -818,9 +868,7 @@ function handlePathHighlightToggleChange(nextState) {
 
   const selectionContext = getSelectionContext();
   selectedNodeIds = selectionContext.selectedNodeSet;
-  if (!selectedNodeId || !selectedNodeIds.has(selectedNodeId)) {
-    selectedNodeId = selectedNodeIds.values().next().value ?? null;
-  }
+  syncSelectedNodeIdWithSelectionSet();
   applySelectionHighlight(selectionContext, { animateCamera: false });
 }
 
@@ -901,18 +949,16 @@ async function handleLayoutChange(layout) {
   const shouldPreserveSelection = selectedNodeIds.size > 0;
   const radialCenterNodeId = preservedSelectedNodeId && selectedNodeIds.has(preservedSelectedNodeId)
     ? preservedSelectedNodeId
-    : selectedNodeIds.values().next().value ?? null;
+    : getFirstSetValue(selectedNodeIds);
   const preservedFilterQuery = document.getElementById('search').value.trim();
   const shouldPreserveFilter = !shouldPreserveSelection && Boolean(preservedFilterQuery);
 
   if (shouldPreserveSelection) {
     hoveredNodeId = null;
-    tooltip.classList.remove('visible');
-    tooltip.setAttribute('aria-hidden', 'true');
+    hideTooltipImmediately();
   } else if (shouldPreserveFilter) {
     hoveredNodeId = null;
-    tooltip.classList.remove('visible');
-    tooltip.setAttribute('aria-hidden', 'true');
+    hideTooltipImmediately();
     UI.hideInfoPanel();
   } else {
     handleEmptyClick();
@@ -941,26 +987,11 @@ async function handleLayoutChange(layout) {
   currentLayout = layout;
   UI.setActiveLayout(layout);
 
-  Renderer.setAnimationPerformanceMode(true);
   try {
-    let animationFrame = 0;
-    await animateToPositions(
-      graph.nodes,
-      positions,
-      ({ isFinalFrame }) => {
-        animationFrame += 1;
-        Renderer.updatePositions({
-          updateArrows: false,
-          updateEdges: isFinalFrame || animationFrame % 3 === 0,
-        });
-      },
-      900
-    );
+    await animateGraphToPositions(positions, 900);
   } finally {
-    Renderer.setAnimationPerformanceMode(false);
-    Renderer.updatePositions();
+    isAnimating = false;
   }
-  isAnimating = false;
 
   // Re-apply visuals from live state so cleared/changed selections are respected.
   refreshCurrentVisualState();
@@ -1115,7 +1146,7 @@ function parseVideoLevel(value, actionName, index) {
 }
 
 function getVideoCameraDefaultDuration(actionName) {
-  if (actionName === 'orbit' || actionName === 'autoRotate') {
+  if (VIDEO_ORBIT_ACTIONS.has(actionName)) {
     return VIDEO_DEFAULT_ORBIT_DURATION;
   }
   return VIDEO_DEFAULT_CAMERA_DURATION;
@@ -1192,27 +1223,28 @@ function resolveVideoNodeId(nodeRef) {
   return lookup.get(slug) ?? null;
 }
 
-function canonicalVideoActionName(actionName) {
-  switch (actionName) {
-    case 'select':
-      return 'selectNode';
-    case 'unselect':
-      return 'unselectNode';
-    case 'focus':
-    case 'focusCamera':
-      return 'cameraFocus';
-    case 'cameraMove':
-    case 'move':
-      return 'moveCamera';
-    case 'rotateCamera':
-      return 'autoRotate';
-    case 'openNodeTooltip':
-      return 'openTooltip';
-    case 'closeNodeTooltip':
-      return 'closeTooltip';
-    default:
-      return actionName;
+function resolveVideoReferencedNode({
+  nodeRef,
+  fieldName,
+  unknownLabel,
+  actionName,
+  index,
+}) {
+  if (nodeRef == null) return null;
+  if (typeof nodeRef !== 'string' || nodeRef.trim().length === 0) {
+    throw new Error(`Action "${actionName}" at index ${index} has invalid ${fieldName}.`);
   }
+  const resolved = resolveVideoNodeId(nodeRef);
+  if (!resolved) {
+    throw new Error(
+      `Action "${actionName}" at index ${index} references unknown ${unknownLabel} "${nodeRef}".`,
+    );
+  }
+  return resolved;
+}
+
+function canonicalVideoActionName(actionName) {
+  return VIDEO_ACTION_ALIASES.get(actionName) ?? actionName;
 }
 
 function parseVideoScriptInput(scriptInput) {
@@ -1228,22 +1260,11 @@ function parseVideoScriptInput(scriptInput) {
 }
 
 function actionRequiresNodeId(actionName) {
-  return actionName === 'selectNode'
-    || actionName === 'focusNode'
-    || actionName === 'highlightNeighbors'
-    || actionName === 'highlightDescendants'
-    || actionName === 'highlightDependencies'
-    || actionName === 'openTooltip'
-    || actionName === 'fadeLabel';
+  return VIDEO_ACTIONS_REQUIRING_NODE_ID.has(actionName);
 }
 
 function isCameraTimelineAction(actionName) {
-  return actionName === 'focusNode'
-    || actionName === 'cameraFocus'
-    || actionName === 'moveCamera'
-    || actionName === 'orbit'
-    || actionName === 'autoRotate'
-    || actionName === 'zoomTo';
+  return VIDEO_CAMERA_TIMELINE_ACTIONS.has(actionName);
 }
 
 function normalizeVideoAction(rawAction, index) {
@@ -1301,7 +1322,7 @@ function normalizeVideoAction(rawAction, index) {
     }
   }
 
-  if (actionName === 'orbit' || actionName === 'autoRotate') {
+  if (VIDEO_ORBIT_ACTIONS.has(actionName)) {
     const axis = String(rawAction.axis ?? 'y').toLowerCase();
     if (axis !== 'x' && axis !== 'y' && axis !== 'z') {
       throw new Error(`Action "${declaredActionName}" at index ${index} has invalid axis "${rawAction.axis}".`);
@@ -1311,19 +1332,14 @@ function normalizeVideoAction(rawAction, index) {
     normalized.speed = toFiniteNumber(rawAction.speed, defaultSpeed);
 
     const pivot = parseVideoVec3(rawAction.pivot, 'pivot', declaredActionName, index);
-    let pivotNodeId = null;
     const pivotNodeRef = rawAction.pivotNodeId ?? rawAction.targetNodeId;
-    if (pivotNodeRef != null) {
-      if (typeof pivotNodeRef !== 'string' || pivotNodeRef.trim().length === 0) {
-        throw new Error(`Action "${declaredActionName}" at index ${index} has invalid pivotNodeId.`);
-      }
-      pivotNodeId = resolveVideoNodeId(pivotNodeRef);
-      if (!pivotNodeId) {
-        throw new Error(
-          `Action "${declaredActionName}" at index ${index} references unknown pivot node "${pivotNodeRef}".`,
-        );
-      }
-    }
+    const pivotNodeId = resolveVideoReferencedNode({
+      nodeRef: pivotNodeRef,
+      fieldName: 'pivotNodeId',
+      unknownLabel: 'pivot node',
+      actionName: declaredActionName,
+      index,
+    });
     normalized._cameraPivot = pivot;
     normalized._cameraPivotNodeId = pivotNodeId;
   }
@@ -1346,15 +1362,13 @@ function normalizeVideoAction(rawAction, index) {
     let focusNodeId = normalized.nodeId ?? null;
     const focusNodeRef = rawAction.targetNodeId ?? rawAction.focusNodeId;
     if (!focusNodeId && focusNodeRef != null) {
-      if (typeof focusNodeRef !== 'string' || focusNodeRef.trim().length === 0) {
-        throw new Error(`Action "${declaredActionName}" at index ${index} has invalid targetNodeId.`);
-      }
-      focusNodeId = resolveVideoNodeId(focusNodeRef);
-      if (!focusNodeId) {
-        throw new Error(
-          `Action "${declaredActionName}" at index ${index} references unknown target node "${focusNodeRef}".`,
-        );
-      }
+      focusNodeId = resolveVideoReferencedNode({
+        nodeRef: focusNodeRef,
+        fieldName: 'targetNodeId',
+        unknownLabel: 'target node',
+        actionName: declaredActionName,
+        index,
+      });
     }
     if (!focusNodeId && !focusTarget) {
       throw new Error(
@@ -1402,19 +1416,14 @@ function normalizeVideoAction(rawAction, index) {
       index,
     );
 
-    let targetNodeId = null;
     const targetNodeRef = rawAction.targetNodeId ?? rawAction.lookAtNodeId;
-    if (targetNodeRef != null) {
-      if (typeof targetNodeRef !== 'string' || targetNodeRef.trim().length === 0) {
-        throw new Error(`Action "${declaredActionName}" at index ${index} has invalid targetNodeId.`);
-      }
-      targetNodeId = resolveVideoNodeId(targetNodeRef);
-      if (!targetNodeId) {
-        throw new Error(
-          `Action "${declaredActionName}" at index ${index} references unknown target node "${targetNodeRef}".`,
-        );
-      }
-    }
+    const targetNodeId = resolveVideoReferencedNode({
+      nodeRef: targetNodeRef,
+      fieldName: 'targetNodeId',
+      unknownLabel: 'target node',
+      actionName: declaredActionName,
+      index,
+    });
 
     if (!absolutePosition && !positionDelta && !absoluteTarget && !targetDelta && !targetNodeId) {
       throw new Error(
@@ -1668,7 +1677,7 @@ function applyVideoActionAtTime(state, action, timelineTime) {
         state.selectedNodeIds.clear();
       }
       if (!state.focusNodeId || !state.selectedNodeIds.has(state.focusNodeId)) {
-        state.focusNodeId = state.selectedNodeIds.values().next().value ?? null;
+        state.focusNodeId = getFirstSetValue(state.selectedNodeIds);
       }
       break;
     case 'focusNode':
@@ -1704,13 +1713,16 @@ function applyVideoActionAtTime(state, action, timelineTime) {
       state.visibilityMode = VIDEO_GRAPH_VISIBILITY.REVEALED;
       break;
     case 'openTooltip':
-      applyVideoTooltipFade(state, { ...action, opacity: action.opacity ?? 1 }, progress);
-      break;
     case 'closeTooltip':
-      applyVideoTooltipFade(state, { ...action, opacity: 0 }, progress);
-      break;
     case 'fadeLabel':
-      applyVideoTooltipFade(state, action, progress);
+      applyVideoTooltipFade(
+        state,
+        {
+          ...action,
+          opacity: action.action === 'closeTooltip' ? 0 : (action.opacity ?? 1),
+        },
+        progress,
+      );
       break;
     case 'orbit':
     case 'autoRotate':
@@ -1740,17 +1752,11 @@ function hideTooltipImmediately() {
 }
 
 function applyHiddenGraphStyle() {
-  const colorMap = new Map();
-  for (const n of graph.nodes) {
-    const baseColor = getNodeBaseColor(n);
-    colorMap.set(n.id, { ...baseColor, a: 0 });
-    n._currentScale = n._baseScale;
-    n._hoverRestoreScale = null;
-  }
-  Renderer.updateColors(colorMap);
-  Renderer.updatePositions();
-  Renderer.setEdgeOpacity(0);
-  Renderer.clearHighlightEdges();
+  applyBaseGraphStyle({
+    nodeOpacity: 0,
+    edgeOpacity: 0,
+    updateNodePositions: true,
+  });
 }
 
 function applyVideoTooltipState(nodeId, opacity = 1) {
@@ -1787,7 +1793,7 @@ function applyVideoSeekStateToScene(state, timelineTime) {
   selectedNodeIds = new Set(state.selectedNodeIds);
   selectedNodeId = selectedNodeIds.has(state.focusNodeId)
     ? state.focusNodeId
-    : selectedNodeIds.values().next().value ?? null;
+    : getFirstSetValue(selectedNodeIds);
   hoveredNodeId = null;
   if (container) container.style.cursor = 'default';
 
@@ -1805,9 +1811,7 @@ function applyVideoSeekStateToScene(state, timelineTime) {
       }
       : getSelectionContext(selectedNodeIds);
     selectedNodeIds = selectionContext.selectedNodeSet;
-    if (!selectedNodeId || !selectedNodeIds.has(selectedNodeId)) {
-      selectedNodeId = selectedNodeIds.values().next().value ?? null;
-    }
+    syncSelectedNodeIdWithSelectionSet();
     applySelectionHighlight(selectionContext, {
       animateCamera: false,
       focusNodeId: selectedNodeId,
@@ -1878,29 +1882,25 @@ async function captureVideoFrame() {
   return Renderer.captureScreenshot();
 }
 
+async function withInitializedGraph(initPromise, errorMessage, action) {
+  await initPromise;
+  if (!graph) {
+    throw new Error(errorMessage);
+  }
+  return action();
+}
+
 function installGraphVideoApi(initPromise) {
+  const withGraph = (errorMessage, action) =>
+    withInitializedGraph(initPromise, errorMessage, action);
+
   window.graphVideo = {
-    async runScript(script) {
-      await initPromise;
-      if (!graph) {
-        throw new Error('Graph failed to initialize. Cannot run video script.');
-      }
-      return runVideoScript(script);
-    },
-    async seek(t) {
-      await initPromise;
-      if (!graph) {
-        throw new Error('Graph failed to initialize. Cannot seek timeline.');
-      }
-      return seekVideoTimeline(t);
-    },
-    async captureFrame() {
-      await initPromise;
-      if (!graph) {
-        throw new Error('Graph failed to initialize. Cannot capture frame.');
-      }
-      return captureVideoFrame();
-    },
+    runScript: (script) =>
+      withGraph('Graph failed to initialize. Cannot run video script.', () => runVideoScript(script)),
+    seek: (t) =>
+      withGraph('Graph failed to initialize. Cannot seek timeline.', () => seekVideoTimeline(t)),
+    captureFrame: () =>
+      withGraph('Graph failed to initialize. Cannot capture frame.', () => captureVideoFrame()),
     getDuration() {
       return videoTimelineState.duration;
     },

@@ -92,6 +92,97 @@ function setMetricValue(elementId, value, options) {
   el.textContent = formatMetricValue(value, options);
 }
 
+function bindSelectChange(elementId, onChange, { notifyInitial = false } = {}) {
+  const select = document.getElementById(elementId);
+  if (!select) return;
+
+  const emitChange = () => {
+    onChange(select.value);
+  };
+
+  select.addEventListener("change", emitChange);
+  if (notifyInitial) emitChange();
+}
+
+function setInfoMetrics({
+  pagerank,
+  degreeCentrality,
+  betweennessCentrality,
+  descendantRatio,
+  prerequisiteRatio,
+  reachabilityRatio,
+}) {
+  setMetricValue("info-pagerank", pagerank, { digits: 6 });
+  setMetricValue("info-degree-centrality", degreeCentrality, { digits: 6 });
+  setMetricValue("info-betweenness-centrality", betweennessCentrality, {
+    digits: 6,
+  });
+  setMetricValue("info-descendant-ratio", descendantRatio, { percent: true });
+  setMetricValue("info-prerequisite-ratio", prerequisiteRatio, {
+    percent: true,
+  });
+  setMetricValue("info-reachability-ratio", reachabilityRatio, {
+    percent: true,
+  });
+}
+
+function getPathHighlightToggleElements() {
+  const prerequisitesToggle = document.getElementById("toggle-prerequisites");
+  const dependentsToggle = document.getElementById("toggle-dependents");
+  return { prerequisitesToggle, dependentsToggle };
+}
+
+function setupPanelResizerPointerDown(
+  resizer,
+  {
+    isDisabled,
+    getWidth,
+    clampWidth,
+    setWidth,
+    getDelta,
+    onSync,
+  },
+) {
+  if (!resizer) return;
+
+  resizer.addEventListener("pointerdown", (event) => {
+    if (isDisabled()) return;
+
+    event.preventDefault();
+    cleanupPanelResize();
+
+    const target = event.currentTarget;
+    const startX = event.clientX;
+    const startWidth = getWidth();
+    target.setPointerCapture(event.pointerId);
+    document.body.classList.add("resizing-panels");
+
+    const handlePointerMove = (moveEvent) => {
+      const delta = getDelta(startX, moveEvent.clientX);
+      setWidth(clampWidth(startWidth + delta));
+      onSync();
+    };
+
+    const handlePointerUp = () => {
+      try {
+        target.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture can already be gone if the interaction was interrupted.
+      }
+      document.body.classList.remove("resizing-panels");
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      panelResizeCleanup = null;
+    };
+
+    panelResizeCleanup = handlePointerUp;
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  });
+}
+
 export function setupSearch(onSearch) {
   const input = document.getElementById("search");
 
@@ -114,12 +205,7 @@ export function setSearchValue(value) {
 }
 
 export function setupLayoutSelector(onChange) {
-  const select = document.getElementById("layout-select");
-  if (!select) return;
-
-  select.addEventListener("change", () => {
-    onChange(select.value);
-  });
+  bindSelectChange("layout-select", onChange);
 }
 
 export function setupAutoRotate(onToggle) {
@@ -134,23 +220,11 @@ export function setupAutoRotate(onToggle) {
 }
 
 export function setupNodeColoring(onChange) {
-  const select = document.getElementById("node-coloring-select");
-  if (!select) return;
-
-  select.addEventListener("change", () => {
-    onChange(select.value);
-  });
-  onChange(select.value);
+  bindSelectChange("node-coloring-select", onChange, { notifyInitial: true });
 }
 
 export function setupNodeSizing(onChange) {
-  const select = document.getElementById("node-sizing-select");
-  if (!select) return;
-
-  select.addEventListener("change", () => {
-    onChange(select.value);
-  });
-  onChange(select.value);
+  bindSelectChange("node-sizing-select", onChange, { notifyInitial: true });
 }
 
 export function setupSettingsPanel() {
@@ -170,41 +244,15 @@ export function setupSettingsPanel() {
     syncSettingsPanelState();
   });
 
-  settingsResizer.addEventListener("pointerdown", (event) => {
-    if (!settingsPanelOpen) return;
-
-    event.preventDefault();
-    cleanupPanelResize();
-
-    const target = event.currentTarget;
-    const startX = event.clientX;
-    const startWidth = settingsWidth;
-    target.setPointerCapture(event.pointerId);
-    document.body.classList.add("resizing-panels");
-
-    const handlePointerMove = (moveEvent) => {
-      const delta = moveEvent.clientX - startX;
-      settingsWidth = clampSettingsWidth(startWidth + delta);
-      syncSettingsPanelState();
-    };
-
-    const handlePointerUp = () => {
-      try {
-        target.releasePointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture can already be gone if the interaction was interrupted.
-      }
-      document.body.classList.remove("resizing-panels");
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      panelResizeCleanup = null;
-    };
-
-    panelResizeCleanup = handlePointerUp;
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+  setupPanelResizerPointerDown(settingsResizer, {
+    isDisabled: () => !settingsPanelOpen,
+    getWidth: () => settingsWidth,
+    clampWidth: clampSettingsWidth,
+    setWidth: (width) => {
+      settingsWidth = width;
+    },
+    getDelta: (startX, currentX) => currentX - startX,
+    onSync: syncSettingsPanelState,
   });
 
   settingsResizer.addEventListener("keydown", (event) => {
@@ -300,12 +348,14 @@ export function showInfoPanel(
     `${upstreamCount} prerequisite${upstreamCount !== 1 ? "s" : ""} in full chain`;
   document.getElementById("info-downstream").textContent =
     `${downstreamCount} concept${downstreamCount !== 1 ? "s" : ""} depend${downstreamCount === 1 ? "s" : ""} on this`;
-  setMetricValue("info-pagerank", node._pagerank, { digits: 6 });
-  setMetricValue("info-degree-centrality", node._degree_centrality, { digits: 6 });
-  setMetricValue("info-betweenness-centrality", node._betweenness_centrality, { digits: 6 });
-  setMetricValue("info-descendant-ratio", node._descendant_ratio, { percent: true });
-  setMetricValue("info-prerequisite-ratio", node._prerequisite_ratio, { percent: true });
-  setMetricValue("info-reachability-ratio", node._reachability_ratio, { percent: true });
+  setInfoMetrics({
+    pagerank: node._pagerank,
+    degreeCentrality: node._degree_centrality,
+    betweennessCentrality: node._betweenness_centrality,
+    descendantRatio: node._descendant_ratio,
+    prerequisiteRatio: node._prerequisite_ratio,
+    reachabilityRatio: node._reachability_ratio,
+  });
 
   fillNodeList(
     "info-prereqs",
@@ -361,12 +411,14 @@ export function showSelectionGroupPanel({
   document.getElementById("info-downstream").textContent =
     `${dependentCount} concept${dependentCount !== 1 ? "s" : ""} depend${dependentCount === 1 ? "s" : ""} on this selection`;
 
-  setMetricValue("info-pagerank", null);
-  setMetricValue("info-degree-centrality", null);
-  setMetricValue("info-betweenness-centrality", null);
-  setMetricValue("info-descendant-ratio", null, { percent: true });
-  setMetricValue("info-prerequisite-ratio", null, { percent: true });
-  setMetricValue("info-reachability-ratio", null, { percent: true });
+  setInfoMetrics({
+    pagerank: null,
+    degreeCentrality: null,
+    betweennessCentrality: null,
+    descendantRatio: null,
+    prerequisiteRatio: null,
+    reachabilityRatio: null,
+  });
 
   fillNodeList(
     "info-prereqs",
@@ -445,41 +497,15 @@ export function setupInfoPanels() {
   const toggle = document.getElementById("analytics-toggle");
   const analyticsResizer = document.getElementById("analytics-resizer");
 
-  infoResizer.addEventListener("pointerdown", (event) => {
-    if (infoCollapsed) return;
-
-    event.preventDefault();
-    cleanupPanelResize();
-
-    const target = event.currentTarget;
-    const startX = event.clientX;
-    const startWidth = infoWidth;
-    target.setPointerCapture(event.pointerId);
-    document.body.classList.add("resizing-panels");
-
-    const handlePointerMove = (moveEvent) => {
-      const delta = startX - moveEvent.clientX;
-      infoWidth = clampInfoWidth(startWidth + delta);
-      syncAnalyticsPanelState();
-    };
-
-    const handlePointerUp = () => {
-      try {
-        target.releasePointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture can already be gone if the interaction was interrupted.
-      }
-      document.body.classList.remove("resizing-panels");
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      panelResizeCleanup = null;
-    };
-
-    panelResizeCleanup = handlePointerUp;
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+  setupPanelResizerPointerDown(infoResizer, {
+    isDisabled: () => infoCollapsed,
+    getWidth: () => infoWidth,
+    clampWidth: clampInfoWidth,
+    setWidth: (width) => {
+      infoWidth = width;
+    },
+    getDelta: (startX, currentX) => startX - currentX,
+    onSync: syncAnalyticsPanelState,
   });
 
   infoToggle.addEventListener("click", () => {
@@ -492,41 +518,15 @@ export function setupInfoPanels() {
     syncAnalyticsPanelState();
   });
 
-  analyticsResizer.addEventListener("pointerdown", (event) => {
-    if (analyticsCollapsed) return;
-
-    event.preventDefault();
-    cleanupPanelResize();
-
-    const target = event.currentTarget;
-    const startX = event.clientX;
-    const startWidth = analyticsWidth;
-    target.setPointerCapture(event.pointerId);
-    document.body.classList.add("resizing-panels");
-
-    const handlePointerMove = (moveEvent) => {
-      const delta = startX - moveEvent.clientX;
-      analyticsWidth = clampAnalyticsWidth(startWidth + delta);
-      syncAnalyticsPanelState();
-    };
-
-    const handlePointerUp = () => {
-      try {
-        target.releasePointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture can already be gone if the interaction was interrupted.
-      }
-      document.body.classList.remove("resizing-panels");
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      panelResizeCleanup = null;
-    };
-
-    panelResizeCleanup = handlePointerUp;
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+  setupPanelResizerPointerDown(analyticsResizer, {
+    isDisabled: () => analyticsCollapsed,
+    getWidth: () => analyticsWidth,
+    clampWidth: clampAnalyticsWidth,
+    setWidth: (width) => {
+      analyticsWidth = width;
+    },
+    getDelta: (startX, currentX) => startX - currentX,
+    onSync: syncAnalyticsPanelState,
   });
 
   infoResizer.addEventListener("keydown", (event) => {
@@ -560,8 +560,8 @@ export function setupInfoPanels() {
 }
 
 export function setupPathHighlightToggles(onChange) {
-  const prerequisitesToggle = document.getElementById("toggle-prerequisites");
-  const dependentsToggle = document.getElementById("toggle-dependents");
+  const { prerequisitesToggle, dependentsToggle } =
+    getPathHighlightToggleElements();
   if (!prerequisitesToggle || !dependentsToggle) return;
 
   if (pathHighlightToggleHandler) {
@@ -582,8 +582,8 @@ export function setupPathHighlightToggles(onChange) {
 }
 
 export function setPathHighlightToggleState(state) {
-  const prerequisitesToggle = document.getElementById("toggle-prerequisites");
-  const dependentsToggle = document.getElementById("toggle-dependents");
+  const { prerequisitesToggle, dependentsToggle } =
+    getPathHighlightToggleElements();
   if (!prerequisitesToggle || !dependentsToggle || !state) return;
 
   suppressPathHighlightToggleEvent = true;
@@ -594,8 +594,8 @@ export function setPathHighlightToggleState(state) {
 
 export function setPathHighlightToggleEnabled(enabled) {
   const controls = document.getElementById("path-highlight-controls");
-  const prerequisitesToggle = document.getElementById("toggle-prerequisites");
-  const dependentsToggle = document.getElementById("toggle-dependents");
+  const { prerequisitesToggle, dependentsToggle } =
+    getPathHighlightToggleElements();
   if (!controls || !prerequisitesToggle || !dependentsToggle) return;
 
   const isDisabled = !enabled;
@@ -610,28 +610,24 @@ function clampPanelWidth(width, minWidth, maxWidth) {
   return Math.max(safeMinWidth, Math.min(safeMaxWidth, width));
 }
 
-function getAnalyticsCollapsedWidth() {
+function getPanelCollapsedWidth(propertyName) {
   const sidePanels = document.getElementById("side-panels");
   if (!sidePanels) return 56;
 
   const value = parseFloat(
     getComputedStyle(sidePanels)
-      .getPropertyValue("--analytics-panel-collapsed-width")
+      .getPropertyValue(propertyName)
       .trim(),
   );
   return Number.isFinite(value) ? value : 56;
 }
 
-function getInfoCollapsedWidth() {
-  const sidePanels = document.getElementById("side-panels");
-  if (!sidePanels) return 56;
+function getAnalyticsCollapsedWidth() {
+  return getPanelCollapsedWidth("--analytics-panel-collapsed-width");
+}
 
-  const value = parseFloat(
-    getComputedStyle(sidePanels)
-      .getPropertyValue("--info-panel-collapsed-width")
-      .trim(),
-  );
-  return Number.isFinite(value) ? value : 56;
+function getInfoCollapsedWidth() {
+  return getPanelCollapsedWidth("--info-panel-collapsed-width");
 }
 
 function getInfoResizerWidth() {
@@ -880,10 +876,11 @@ export function getNodeIdFromHash() {
 }
 
 export function setupShareButtons(getCurrentNodeId, getCurrentNodeLabel) {
+  const getCurrentPermalink = () => getPermalink(getCurrentNodeId());
+
   document.getElementById("share-x").addEventListener("click", () => {
-    const nodeId = getCurrentNodeId();
     const label = getCurrentNodeLabel();
-    const url = getPermalink(nodeId);
+    const url = getCurrentPermalink();
     const text = label
       ? `Exploring "${label}" in the ML Knowledge Graph — see how concepts connect:`
       : "Explore 2,000+ ML & math concepts in this interactive 3D knowledge graph:";
@@ -895,8 +892,7 @@ export function setupShareButtons(getCurrentNodeId, getCurrentNodeLabel) {
   });
 
   document.getElementById("share-linkedin").addEventListener("click", () => {
-    const nodeId = getCurrentNodeId();
-    const url = getPermalink(nodeId);
+    const url = getCurrentPermalink();
     window.open(
       `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`,
       "_blank",
@@ -905,8 +901,7 @@ export function setupShareButtons(getCurrentNodeId, getCurrentNodeLabel) {
   });
 
   document.getElementById("share-copy").addEventListener("click", () => {
-    const nodeId = getCurrentNodeId();
-    const url = getPermalink(nodeId);
+    const url = getCurrentPermalink();
     navigator.clipboard
       .writeText(url)
       .then(() => {
@@ -919,8 +914,7 @@ export function setupShareButtons(getCurrentNodeId, getCurrentNodeLabel) {
   });
 
   document.getElementById("share-embed").addEventListener("click", () => {
-    const nodeId = getCurrentNodeId();
-    const url = getPermalink(nodeId);
+    const url = getCurrentPermalink();
     const embedCode = `<iframe src="${url}" width="800" height="600" frameborder="0" allow="fullscreen" style="border-radius:8px;border:1px solid #333"></iframe>`;
     navigator.clipboard
       .writeText(embedCode)

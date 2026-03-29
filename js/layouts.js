@@ -13,6 +13,23 @@ import {
 const FORCE_MIN_TICKS = 120;
 const FORCE_MAX_TICKS = 220;
 const FORCE_ALPHA_STOP = 0.018;
+const GOLDEN_SPIRAL_THETA_FACTOR = Math.PI * (1 + Math.sqrt(5));
+
+function pushToGroup(groupMap, key, value) {
+  if (!groupMap.has(key)) groupMap.set(key, []);
+  groupMap.get(key).push(value);
+}
+
+function getGoldenSpiralPoint(index, count, radius, center = { x: 0, y: 0, z: 0 }) {
+  const phi = Math.acos(1 - 2 * (index + 0.5) / count);
+  const theta = GOLDEN_SPIRAL_THETA_FACTOR * index;
+  const sinPhi = Math.sin(phi);
+  return {
+    x: center.x + radius * sinPhi * Math.cos(theta),
+    y: center.y + radius * sinPhi * Math.sin(theta),
+    z: center.z + radius * Math.cos(phi),
+  };
+}
 
 // --- Force-directed layout (default) ---
 
@@ -85,8 +102,7 @@ export function computeHierarchicalLayout(nodes) {
   const depthGroups = new Map();
   let maxDepth = 0;
   for (const node of nodes) {
-    if (!depthGroups.has(node.depth)) depthGroups.set(node.depth, []);
-    depthGroups.get(node.depth).push(node);
+    pushToGroup(depthGroups, node.depth, node);
     if (node.depth > maxDepth) maxDepth = node.depth;
   }
 
@@ -116,8 +132,7 @@ export function computeClusterLayout(nodes) {
   const clusterGroups = new Map();
   for (const node of nodes) {
     const cat = node.category || 'other';
-    if (!clusterGroups.has(cat)) clusterGroups.set(cat, []);
-    clusterGroups.get(cat).push(node);
+    pushToGroup(clusterGroups, cat, node);
   }
 
   const positions = new Map();
@@ -127,13 +142,7 @@ export function computeClusterLayout(nodes) {
   // Distribute cluster centroids on a sphere via golden spiral
   const centroids = new Map();
   for (let i = 0; i < clusters.length; i++) {
-    const phi = Math.acos(1 - 2 * (i + 0.5) / clusters.length);
-    const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-    centroids.set(clusters[i], {
-      x: sphereRadius * Math.sin(phi) * Math.cos(theta),
-      y: sphereRadius * Math.sin(phi) * Math.sin(theta),
-      z: sphereRadius * Math.cos(phi),
-    });
+    centroids.set(clusters[i], getGoldenSpiralPoint(i, clusters.length, sphereRadius));
   }
 
   // Arrange nodes within each cluster
@@ -142,13 +151,7 @@ export function computeClusterLayout(nodes) {
     const r = Math.max(20, Math.sqrt(group.length) * 8);
 
     for (let i = 0; i < group.length; i++) {
-      const phi = Math.acos(1 - 2 * (i + 0.5) / group.length);
-      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-      positions.set(group[i].id, {
-        x: center.x + r * Math.sin(phi) * Math.cos(theta),
-        y: center.y + r * Math.sin(phi) * Math.sin(theta),
-        z: center.z + r * Math.cos(phi),
-      });
+      positions.set(group[i].id, getGoldenSpiralPoint(i, group.length, r, center));
     }
   }
 
@@ -183,20 +186,13 @@ export function computeRadialLayout(nodes, centerId, nodeMap) {
   const distGroups = new Map();
   for (const [nid, dist] of distances) {
     if (dist === 0) continue;
-    if (!distGroups.has(dist)) distGroups.set(dist, []);
-    distGroups.get(dist).push(nid);
+    pushToGroup(distGroups, dist, nid);
   }
 
   for (const [dist, group] of distGroups) {
     const radius = dist <= 5 ? dist * 40 : 200 + (dist - 5) * 10;
     for (let i = 0; i < group.length; i++) {
-      const phi = Math.acos(1 - 2 * (i + 0.5) / group.length);
-      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-      positions.set(group[i], {
-        x: radius * Math.sin(phi) * Math.cos(theta),
-        y: radius * Math.sin(phi) * Math.sin(theta),
-        z: radius * Math.cos(phi),
-      });
+      positions.set(group[i], getGoldenSpiralPoint(i, group.length, radius));
     }
   }
 

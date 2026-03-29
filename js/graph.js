@@ -162,7 +162,7 @@ function computeRadii(nodes) {
 
 // --- Graph traversal ---
 
-export function getUpstream(nodeId, nodeMap) {
+function traverseReachable(nodeId, nodeMap, edgeKey) {
   const visited = new Set();
   const queue = [nodeId];
   for (let q = 0; q < queue.length; q++) {
@@ -171,27 +171,19 @@ export function getUpstream(nodeId, nodeMap) {
     visited.add(current);
     const node = nodeMap.get(current);
     if (!node) continue;
-    for (const pid of node.from) {
-      if (!visited.has(pid)) queue.push(pid);
+    for (const nextId of node[edgeKey]) {
+      if (!visited.has(nextId)) queue.push(nextId);
     }
   }
   return visited;
 }
 
+export function getUpstream(nodeId, nodeMap) {
+  return traverseReachable(nodeId, nodeMap, 'from');
+}
+
 export function getDownstream(nodeId, nodeMap) {
-  const visited = new Set();
-  const queue = [nodeId];
-  for (let q = 0; q < queue.length; q++) {
-    const current = queue[q];
-    if (visited.has(current)) continue;
-    visited.add(current);
-    const node = nodeMap.get(current);
-    if (!node) continue;
-    for (const cid of node.to) {
-      if (!visited.has(cid)) queue.push(cid);
-    }
-  }
-  return visited;
+  return traverseReachable(nodeId, nodeMap, 'to');
 }
 
 export function getUpstreamDistances(startId, nodeMap) {

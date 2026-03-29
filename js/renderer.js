@@ -281,6 +281,39 @@ function makeArrowGeometry(radius, height) {
   return geo;
 }
 
+function hideArrowInstance(arrowMesh, instanceIdx) {
+  dummy.scale.setScalar(0);
+  dummy.position.set(0, 0, 0);
+  dummy.updateMatrix();
+  arrowMesh.setMatrixAt(instanceIdx, dummy.matrix);
+}
+
+function forEachEdgeLayer(visitor) {
+  visitor({
+    lines: edgeLines,
+    edgeList,
+    positions: edgePositions,
+    arrows: edgeArrows,
+  });
+  for (const layer of highlightLayers) {
+    visitor(layer);
+  }
+}
+
+function updateEdgeLayer(layer, { updateEdges, updateArrows }) {
+  if (updateEdges && layer.lines && layer.edgeList && layer.positions) {
+    updateLinePositions(layer.lines, layer.edgeList, layer.positions);
+  }
+
+  if (layer.arrows && layer.edgeList) {
+    if (updateArrows && !animationPerformanceMode) {
+      positionArrows(layer.arrows, layer.edgeList);
+    } else {
+      deferredArrowRefresh = true;
+    }
+  }
+}
+
 function buildEdgeArrows() {
   if (edgeArrows) {
     scene.remove(edgeArrows);
@@ -313,10 +346,7 @@ function positionArrows(arrowMesh, list) {
 
     for (let a = 0; a < ARROWS_PER_EDGE; a++) {
       if (len < 0.001) {
-        dummy.scale.setScalar(0);
-        dummy.position.set(0, 0, 0);
-        dummy.updateMatrix();
-        arrowMesh.setMatrixAt(instanceIdx++, dummy.matrix);
+        hideArrowInstance(arrowMesh, instanceIdx++);
         continue;
       }
 
@@ -339,10 +369,7 @@ function positionArrows(arrowMesh, list) {
       );
       const arrowDirLength = arrowDir.length();
       if (arrowDirLength < 0.001) {
-        dummy.scale.setScalar(0);
-        dummy.position.set(0, 0, 0);
-        dummy.updateMatrix();
-        arrowMesh.setMatrixAt(instanceIdx++, dummy.matrix);
+        hideArrowInstance(arrowMesh, instanceIdx++);
         continue;
       }
       arrowDir.divideScalar(arrowDirLength);
@@ -446,31 +473,9 @@ export function updatePositions(options = {}) {
   instancedMesh.instanceMatrix.needsUpdate = true;
   instancedMesh.boundingSphere = null; // invalidate so raycaster recomputes after layout change
 
-  if (updateEdges && edgeLines && edgeList && edgePositions) {
-    updateLinePositions(edgeLines, edgeList, edgePositions);
-  }
-
-  if (edgeArrows && edgeList) {
-    if (updateArrows && !animationPerformanceMode) {
-      positionArrows(edgeArrows, edgeList);
-    } else {
-      deferredArrowRefresh = true;
-    }
-  }
-
-  for (const layer of highlightLayers) {
-    if (updateEdges && layer.lines && layer.edgeList && layer.positions) {
-      updateLinePositions(layer.lines, layer.edgeList, layer.positions);
-    }
-
-    if (layer.arrows && layer.edgeList) {
-      if (updateArrows && !animationPerformanceMode) {
-        positionArrows(layer.arrows, layer.edgeList);
-      } else {
-        deferredArrowRefresh = true;
-      }
-    }
-  }
+  forEachEdgeLayer((layer) => {
+    updateEdgeLayer(layer, { updateEdges, updateArrows });
+  });
 }
 
 export function updateColors(colorMap) {
@@ -621,19 +626,19 @@ export function setAnimationPerformanceMode(enabled) {
   );
   animationPerformanceMode = animationPerformanceRequests > 0;
 
-  if (edgeArrows) edgeArrows.visible = !animationPerformanceMode;
-  for (const layer of highlightLayers) {
-    if (layer.arrows) layer.arrows.visible = !animationPerformanceMode;
-  }
+  forEachEdgeLayer((layer) => {
+    if (layer.arrows) {
+      layer.arrows.visible = !animationPerformanceMode;
+    }
+  });
 
   if (!animationPerformanceMode && deferredArrowRefresh) {
     deferredArrowRefresh = false;
-    if (edgeArrows && edgeList) positionArrows(edgeArrows, edgeList);
-    for (const layer of highlightLayers) {
+    forEachEdgeLayer((layer) => {
       if (layer.arrows && layer.edgeList) {
         positionArrows(layer.arrows, layer.edgeList);
       }
-    }
+    });
   }
 
   if (renderer) onResize();
