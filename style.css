@@ -1019,6 +1019,26 @@ body.resizing-panels {
   transform: translateX(-50%) translateY(0);
 }
 
+/* Video render mode */
+body.video-render-mode #top-bar,
+body.video-render-mode #settings-shell,
+body.video-render-mode #side-panels,
+body.video-render-mode #controls-hint,
+body.video-render-mode #toast {
+  display: none !important;
+}
+
+body.video-render-mode #tooltip,
+body.video-render-mode #tooltip-shape,
+body.video-render-mode .tooltip-label,
+body.video-render-mode #tooltip-connector-path {
+  transition: none !important;
+}
+
+body.video-render-mode #tooltip {
+  transform: translate3d(0, 0, 0) scale(1) !important;
+}
+
 @media (max-width: 640px) {
   .book-cta {
     padding: 14px;

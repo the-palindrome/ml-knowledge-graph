@@ -27,3 +27,73 @@ Then open http://localhost:8000 in your browser.
 - **Search** to filter concepts by name
 - **Layout selector** to switch between Force, Hierarchical, Cluster, and Radial views
 - **Legend** — click a cluster to highlight all its nodes
+
+## Video Rendering Automation
+
+The explorer now exposes a deterministic timeline API on `window.graphVideo`:
+
+```js
+window.graphVideo = {
+  async runScript(script) { ... },
+  async seek(t) { ... },
+  async captureFrame() { ... }, // PNG data URL (base64)
+  getDuration() { ... },
+};
+```
+
+Supported script actions:
+
+- `selectNode` / `unselectNode`
+- `focusNode` (selection + camera focus)
+- `cameraFocus` (camera-only focus)
+- `moveCamera`
+- `highlightNeighbors` (prerequisites + dependents)
+- `hideGraph` / `fadeGraph` / `revealGraph`
+- `openTooltip` / `closeTooltip` / `fadeLabel`
+- `orbit` / `autoRotate`
+- `zoomTo`
+
+Camera actions are interpolated over `duration` and are smooth by default.
+If `duration` is omitted on a camera action, a default smooth duration is used.
+
+Aliases are accepted for convenience:
+`select`, `unselect`, `focus`, `focusCamera`, `move`, `cameraMove`, `rotateCamera`, `openNodeTooltip`, `closeNodeTooltip`.
+
+Node references can use:
+
+- internal node IDs
+- node labels (case-insensitive)
+- slug-style labels (for example `gradient-descent`)
+
+### Render Script (Puppeteer + ffmpeg)
+
+1. Install prerequisites:
+
+```bash
+npm install --save-dev puppeteer
+# ffmpeg must also be installed and available in PATH
+```
+
+2. Run the renderer:
+
+```bash
+node scripts/render-graph-video.mjs \
+  --script ./scripts/video-script.example.json \
+  --output ./tmp/graph-video.mp4 \
+  --fps 30 \
+  --width 1920 \
+  --height 1080 \
+  --verbose
+```
+
+By default, the script:
+
+- launches Puppeteer
+- opens a local static server for this repo
+- loads your timeline into `window.graphVideo`
+- seeks frame-by-frame
+- saves PNGs to a temporary frame directory
+- stitches frames with `ffmpeg`
+
+Use `--keep-frames` if you want to preserve individual PNGs.
+Use `--verbose` to print detailed diagnostics (page errors, request failures, and per-frame seek/capture/write timing).

@@ -1,5 +1,64 @@
+# Environment
 .env
-.venv
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Package manifests (requested)
+package.json
+package-lock.json
+
+# Build outputs / artifacts
+dist/
+build/
+out/
+coverage/
 tmp/
-__pycache__
-_site
+_site/
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+.svelte-kit/
+vite.svg
+*.tsbuildinfo
+
+# Python artifacts
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Render/media artifacts
+frames/
+*.mp4
+*.webm
+*.mov
+*.avi
+*.mkv
