@@ -16,6 +16,16 @@ npx serve .
 
 Then open http://localhost:8000 in your browser.
 
+## Layout Cache
+
+The app can optionally read `knowledge_graph.layout.json` at startup as a local cache of precomputed node positions for the default force layout.
+
+- If the file exists and is valid, those cached positions are applied immediately.
+- If the file is missing or invalid, the app falls back to computing the initial force layout in the browser.
+- Hierarchical, cluster, and radial layouts are not read from this file; they are computed on demand when you switch layouts.
+
+`knowledge_graph.layout.json` is treated as a generated local artifact and is ignored by git.
+
 ## Usage
 
 - **Rotate**: drag

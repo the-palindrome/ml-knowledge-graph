@@ -14,7 +14,7 @@ The current implementation is **not** a generic multi-entity publication graph r
 Primary goals:
 
 - explore a large concept DAG in 3D
-- switch between several precomputed layouts
+- switch between several layouts
 - search concepts by label or category
 - inspect recursive prerequisite/dependent context
 - read concept definitions and graph metrics
@@ -32,10 +32,11 @@ Out of scope for the shipped app:
 ## 2. Repository Architecture
 
 ```text
-/
+/ 
 ├── index.html              # App shell, panels, controls, import map
 ├── style.css               # Overlay styling, panel layout, responsive rules
 ├── knowledge_graph.json    # Bundled concept dataset
+├── knowledge_graph.layout.json # Optional local cache of initial force-layout positions
 ├── js/
 │   ├── main.js             # App orchestration and interaction state
 │   ├── graph.js            # Data loading, derived properties, traversal helpers
@@ -103,6 +104,34 @@ Example shape:
   "_reachability_ratio": 0.9951946179721288
 }
 ```
+
+### 4.1.1 Optional Initial Layout Cache
+
+`knowledge_graph.layout.json` is an optional JSON file used only during startup to seed the default force layout with cached node positions.
+
+Accepted shapes:
+
+```json
+{
+  "positions": {
+    "44592926": { "x": -156.2, "y": 266.75, "z": -140.87 }
+  }
+}
+```
+
+or a flat object keyed directly by node ID:
+
+```json
+{
+  "44592926": { "x": -156.2, "y": 266.75, "z": -140.87 }
+}
+```
+
+Runtime behavior:
+
+1. if the cache file exists and parses successfully, the app applies those positions on initial load
+2. if the cache file is missing, malformed, or empty, the app computes the initial force layout in the browser
+3. switching to `hierarchical`, `cluster`, or `radial` does not read from this file; those layouts are computed on demand
 
 ### 4.2 Supported Node Fields
 
@@ -363,6 +392,11 @@ This is used to keep transitions responsive on large graphs.
 ### 7.1 Force Layout
 
 This is the default initial layout.
+
+Startup behavior:
+
+- if `knowledge_graph.layout.json` is available, its cached positions are used instead of running the force simulation
+- otherwise the browser computes the force layout using the parameters below
 
 Simulation parameters:
 

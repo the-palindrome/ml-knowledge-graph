@@ -4,8 +4,9 @@ import { createServer } from 'node:http';
 import { promises as fs } from 'node:fs';
 import fsSync from 'node:fs';
 import path from 'node:path';
+import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +17,7 @@ const DEFAULT_WIDTH = 1920;
 const DEFAULT_HEIGHT = 1080;
 const PAGE_GOTO_TIMEOUT_MS = 60000;
 const GRAPH_API_TIMEOUT_MS = 240000;
+const BROWSER_LAUNCH_TIMEOUT_MS = 15000;
 
 function printUsage() {
   console.log(`Usage:
@@ -32,7 +34,7 @@ Options:
   --url              Use an already-running graph URL (skip local static server)
   --frames-dir       Directory for intermediate PNG frames
   --keep-frames      Keep PNG frames after ffmpeg completes
-  --verbose, -v      Enable verbose diagnostics (Puppeteer/page/frame-level logs)
+  --verbose, -v      Enable verbose diagnostics
   --help, -h         Show this help
 `);
 }
@@ -142,12 +144,10 @@ function runCommand(command, args, options = {}) {
     const child = spawn(command, args, {
       stdio: options.stdio ?? 'pipe',
       cwd: options.cwd ?? process.cwd(),
+      env: options.env ?? process.env,
     });
 
-    child.on('error', (error) => {
-      reject(error);
-    });
-
+    child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) {
         resolve();
@@ -158,17 +158,150 @@ function runCommand(command, args, options = {}) {
   });
 }
 
+function decodeDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string') {
+    throw new Error('Expected a base64 data URL string.');
+  }
+
+  const match = /^data:(.+);base64,(.+)$/s.exec(dataUrl);
+  if (!match) {
+    throw new Error('Unexpected data URL payload.');
+  }
+
+  return {
+    mimeType: match[1],
+    buffer: Buffer.from(match[2], 'base64'),
+  };
+}
+
+function createTimingStats() {
+  return {
+    frameSeekMs: 0,
+    frameCaptureMs: 0,
+    frameOutputMs: 0,
+    frameCount: 0,
+    ffmpegFinalizeMs: 0,
+  };
+}
+
+function formatAverageMs(totalMs, sampleCount) {
+  if (!sampleCount) return '0.00';
+  return (totalMs / sampleCount).toFixed(2);
+}
+
+function logTimingSummary(logger, stats) {
+  logger.info(
+    `Timing summary: avg seek ${formatAverageMs(stats.frameSeekMs, stats.frameCount)} ms, `
+      + `avg capture ${formatAverageMs(stats.frameCaptureMs, stats.frameCount)} ms, `
+      + `avg output ${formatAverageMs(stats.frameOutputMs, stats.frameCount)} ms, `
+      + `ffmpeg finalize ${stats.ffmpegFinalizeMs.toFixed(2)} ms`,
+  );
+}
+
+function getFrameStateSignature(frameState) {
+  if (!frameState) return null;
+  return JSON.stringify({
+    sceneVersion: frameState.sceneVersion ?? null,
+    visibilityMode: frameState.visibilityMode ?? null,
+    selectedNodeIds: frameState.selectedNodeIds ?? [],
+    tooltipNodeId: frameState.tooltipNodeId ?? null,
+    tooltipOpacity: frameState.tooltipOpacity ?? null,
+    cameraState: frameState.cameraState ?? null,
+  });
+}
+
+function startFfmpegEncoder(ffmpegPath, args) {
+  const ffmpegArgs = [
+    '-y',
+    '-threads', '1',
+    '-filter_threads', '1',
+    '-f', 'png_pipe',
+    '-framerate', String(args.fps),
+    '-i', 'pipe:0',
+    '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-pix_fmt', 'yuv420p',
+    '-movflags', '+faststart',
+    args.output,
+  ];
+
+  const child = spawn(ffmpegPath, ffmpegArgs, {
+    stdio: ['pipe', 'inherit', 'inherit'],
+    cwd: process.cwd(),
+    env: process.env,
+  });
+
+  const done = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Command failed (${ffmpegPath}): exit code ${code}`));
+    });
+  });
+
+  return {
+    async writeFrame(frameBuffer) {
+      if (!child.stdin || child.stdin.destroyed) {
+        throw new Error('ffmpeg stdin closed before all frames were written.');
+      }
+      if (child.stdin.write(frameBuffer)) {
+        return;
+      }
+      await once(child.stdin, 'drain');
+    },
+    async finish() {
+      if (child.stdin && !child.stdin.destroyed) {
+        child.stdin.end();
+      }
+      await done;
+    },
+    async abort() {
+      if (child.stdin && !child.stdin.destroyed) {
+        child.stdin.destroy();
+      }
+      child.kill('SIGKILL');
+      await done.catch(() => {});
+    },
+  };
+}
+
 function isChromiumSandboxLaunchError(error) {
   const message = String(error?.message || error || '');
   return /sandbox|setuid|credentials\.cc|permission denied/i.test(message);
 }
 
-async function ensureFfmpegInstalled() {
+function isBrowserDependencyLaunchError(error) {
+  const message = String(error?.message || error || '');
+  return /error while loading shared libraries|failed to launch the browser process|lib[a-z0-9._-]+\.so/i
+    .test(message);
+}
+
+async function resolveFfmpegPath() {
   try {
     await runCommand('ffmpeg', ['-version'], { stdio: 'ignore' });
+    return 'ffmpeg';
   } catch {
-    throw new Error('ffmpeg is required but was not found in PATH.');
+    // Fall through.
   }
+
+  try {
+    const module = await import('ffmpeg-static');
+    const ffmpegPath = module.default ?? module;
+    if (typeof ffmpegPath === 'string' && ffmpegPath.length > 0) {
+      await fs.access(ffmpegPath, fsSync.constants.X_OK);
+      return ffmpegPath;
+    }
+  } catch {
+    // Fall through.
+  }
+
+  throw new Error(
+    'ffmpeg is required but was not found in PATH, and ffmpeg-static is unavailable.',
+  );
 }
 
 async function loadPuppeteer() {
@@ -180,6 +313,94 @@ async function loadPuppeteer() {
       'Missing dependency "puppeteer". Install it with: npm install --save-dev puppeteer',
     );
   }
+}
+
+async function loadChromiumFallbackRuntime() {
+  const [puppeteerCoreModule, chromiumModule, helperModule, lambdafsModule] = await Promise.all([
+    import('puppeteer-core'),
+    import('@sparticuz/chromium'),
+    import(
+      pathToFileURL(
+        path.resolve(projectRoot, 'node_modules', '@sparticuz', 'chromium', 'build', 'esm', 'helper.js'),
+      ).href
+    ),
+    import(
+      pathToFileURL(
+        path.resolve(projectRoot, 'node_modules', '@sparticuz', 'chromium', 'build', 'esm', 'lambdafs.js'),
+      ).href
+    ),
+  ]);
+
+  return {
+    puppeteerCore: puppeteerCoreModule.default ?? puppeteerCoreModule,
+    chromium: chromiumModule.default ?? chromiumModule,
+    helper: helperModule,
+    lambdafs: lambdafsModule,
+  };
+}
+
+async function launchBundledChromium(launchOptions, logger) {
+  const { puppeteerCore, chromium, helper, lambdafs } = await loadChromiumFallbackRuntime();
+  const chromiumBinDir = path.resolve(projectRoot, 'node_modules', '@sparticuz', 'chromium', 'bin');
+  const al2023ArchivePath = path.join(chromiumBinDir, 'al2023.tar.br');
+  const al2023LibPath = path.join('/tmp', 'al2023', 'lib');
+
+  if (fsSync.existsSync(al2023ArchivePath) && !fsSync.existsSync(al2023LibPath)) {
+    await lambdafs.inflate(al2023ArchivePath);
+  }
+  helper.setupLambdaEnvironment(al2023LibPath);
+
+  const executablePath = await chromium.executablePath();
+  logger.debug(`Chromium fallback executable: ${executablePath}`);
+
+  const browser = await puppeteerCore.launch({
+    executablePath,
+    headless: 'shell',
+    timeout: BROWSER_LAUNCH_TIMEOUT_MS,
+    defaultViewport: launchOptions.defaultViewport,
+    args: puppeteerCore.defaultArgs({
+      args: chromium.args,
+      headless: 'shell',
+    }),
+  });
+
+  logger.debug(`Chromium fallback executable: ${executablePath}`);
+  return browser;
+}
+
+async function launchBrowserWithFallbacks({ defaultPuppeteer, launchOptions, logger }) {
+  const attemptDefaultLaunch = async (extraArgs = []) => {
+    return defaultPuppeteer.launch({
+      ...launchOptions,
+      timeout: BROWSER_LAUNCH_TIMEOUT_MS,
+      args: [...launchOptions.args, ...extraArgs],
+    });
+  };
+
+  try {
+    const browser = await attemptDefaultLaunch();
+    return { browser, runtime: 'puppeteer' };
+  } catch (error) {
+    if (isChromiumSandboxLaunchError(error)) {
+      logger.warn(
+        'Chromium sandbox launch failed. Retrying with --no-sandbox --disable-setuid-sandbox.',
+      );
+      try {
+        const browser = await attemptDefaultLaunch(['--no-sandbox', '--disable-setuid-sandbox']);
+        return { browser, runtime: 'puppeteer' };
+      } catch (retryError) {
+        logger.warn(`No-sandbox Chromium launch failed: ${formatError(retryError)}`);
+      }
+    } else if (isBrowserDependencyLaunchError(error)) {
+      logger.warn(`Default Chromium launch failed: ${formatError(error)}`);
+    } else {
+      logger.warn(`Default Chromium launch failed unexpectedly: ${formatError(error)}`);
+    }
+  }
+
+  logger.warn('Default Chromium could not start in this environment. Trying @sparticuz/chromium.');
+  const browser = await launchBundledChromium(launchOptions, logger);
+  return { browser, runtime: '@sparticuz/chromium' };
 }
 
 function getMimeType(filePath) {
@@ -278,26 +499,124 @@ function attachPageDiagnostics(page, logger, verbose) {
     if (!verbose) return;
     logger.debug(`Page console [${message.type()}] ${message.text()}`);
   });
+}
 
-  page.on('response', (response) => {
-    if (!verbose) return;
-    if (response.status() >= 400) {
-      logger.debug(`HTTP ${response.status()} ${response.url()}`);
+async function getCanvasCaptureClip(page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('#canvas-container canvas')
+      ?? document.querySelector('canvas');
+    if (!canvas) {
+      throw new Error('Could not find the graph canvas for screenshot capture.');
     }
+
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      scale: 1,
+    };
   });
 }
 
-function decodePngDataUrl(dataUrl) {
-  const prefix = 'data:image/png;base64,';
-  if (typeof dataUrl !== 'string' || !dataUrl.startsWith(prefix)) {
-    throw new Error('captureFrame() returned an unexpected payload (expected PNG data URL).');
-  }
-  return Buffer.from(dataUrl.slice(prefix.length), 'base64');
+async function captureFrameAsPngBuffer(client, clip) {
+  const { data } = await client.send('Page.captureScreenshot', {
+    format: 'png',
+    clip,
+    fromSurface: true,
+    captureBeyondViewport: false,
+  });
+  return Buffer.from(data, 'base64');
+}
+
+async function tryFastRecord(page, { fps, duration }, timingStats, logger) {
+  logger.info('Trying in-browser MediaRecorder fast path...');
+  const recordStart = performance.now();
+
+  const browserRecording = await page.evaluate(async ({ fps, duration: timelineDuration }) => {
+    const canvas = document.querySelector('#canvas-container canvas') ?? document.querySelector('canvas');
+    if (!canvas || typeof canvas.captureStream !== 'function') {
+      throw new Error('Canvas captureStream() is unavailable.');
+    }
+    if (typeof MediaRecorder !== 'function') {
+      throw new Error('MediaRecorder is unavailable.');
+    }
+
+    const preferredMimeTypes = [
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm',
+    ];
+    const mimeType = preferredMimeTypes.find((candidate) => {
+      return typeof MediaRecorder.isTypeSupported !== 'function'
+        || MediaRecorder.isTypeSupported(candidate);
+    }) ?? '';
+
+    const frameTotal = Math.max(1, Math.floor((timelineDuration * fps) + 1));
+    const stream = canvas.captureStream(fps);
+
+    const recorder = new MediaRecorder(
+      stream,
+      mimeType ? { mimeType, videoBitsPerSecond: 12_000_000 } : { videoBitsPerSecond: 12_000_000 },
+    );
+    const chunks = [];
+    let totalSeekMs = 0;
+
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    };
+
+    const stopPromise = new Promise((resolve, reject) => {
+      recorder.onstop = resolve;
+      recorder.onerror = () => {
+        reject(recorder.error ?? new Error('MediaRecorder failed.'));
+      };
+    });
+
+    recorder.start(250);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    for (let frameIndex = 0; frameIndex < frameTotal; frameIndex += 1) {
+      const seekStart = performance.now();
+      await window.graphVideo.seek(frameIndex / fps);
+      totalSeekMs += performance.now() - seekStart;
+      await new Promise((resolve) => setTimeout(resolve, 1000 / fps));
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, Math.max(500, 1000 / fps)));
+    recorder.stop();
+    await stopPromise;
+    stream.getTracks().forEach((track) => track.stop());
+
+    const resolvedMimeType = recorder.mimeType || mimeType || 'video/webm';
+    const blob = new Blob(chunks, { type: resolvedMimeType });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    const binaryChunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += binaryChunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + binaryChunkSize));
+    }
+
+    return {
+      dataUrl: `data:${resolvedMimeType};base64,${btoa(binary)}`,
+      frameCount: frameTotal,
+      totalSeekMs,
+    };
+  }, { fps, duration });
+
+  timingStats.frameCaptureMs = performance.now() - recordStart;
+  timingStats.frameSeekMs = Number(browserRecording.totalSeekMs) || 0;
+  timingStats.frameCount = Number(browserRecording.frameCount) || 0;
+  return browserRecording;
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const logger = makeLogger(args.verbose);
+  const timingStats = createTimingStats();
   if (args.help) {
     printUsage();
     return;
@@ -311,12 +630,7 @@ async function main() {
   const scriptPath = path.resolve(args.scriptPath);
   logger.info(`Loading timeline script: ${scriptPath}`);
   const scriptContents = await fs.readFile(scriptPath, 'utf8');
-  let actions;
-  try {
-    actions = JSON.parse(scriptContents);
-  } catch (error) {
-    throw new Error(`Failed to parse JSON from script file: ${scriptPath}\n${formatError(error)}`);
-  }
+  const actions = JSON.parse(scriptContents);
   if (!Array.isArray(actions)) {
     throw new Error(`Script file must contain a JSON array: ${scriptPath}`);
   }
@@ -325,33 +639,35 @@ async function main() {
     logger.debug(`Action preview: ${JSON.stringify(actions.slice(0, 3), null, 2)}`);
   }
 
-  logger.debug('Checking ffmpeg availability...');
-  await ensureFfmpegInstalled();
-  logger.debug('Loading Puppeteer...');
+  const ffmpegPath = await resolveFfmpegPath();
   const puppeteer = await loadPuppeteer();
 
   await fs.mkdir(path.dirname(args.output), { recursive: true });
-  logger.debug(`Ensured output directory: ${path.dirname(args.output)}`);
 
-  const frameRoot = args.framesDir
-    ? path.resolve(args.framesDir)
-    : path.resolve(projectRoot, 'tmp', `graph-video-frames-${Date.now()}`);
-  await fs.mkdir(frameRoot, { recursive: true });
-  logger.info(`Frame directory: ${frameRoot}`);
+  const shouldPersistFrames = Boolean(args.framesDir || args.keepFrames);
+  let frameRoot = shouldPersistFrames
+    ? (
+      args.framesDir
+        ? path.resolve(args.framesDir)
+        : path.resolve(projectRoot, 'tmp', `graph-video-frames-${Date.now()}`)
+    )
+    : null;
+  if (frameRoot) {
+    await fs.mkdir(frameRoot, { recursive: true });
+    logger.info(`Frame directory: ${frameRoot}`);
+  } else {
+    logger.info('Frame output: streaming PNG frames directly to ffmpeg.');
+  }
 
   let browser = null;
   let localServer = null;
+  let ffmpegEncoder = null;
 
   try {
     if (!args.url) {
-      logger.debug('Starting local static server...');
       localServer = await startStaticServer(projectRoot);
       logger.info(`Local server started at ${localServer.url}`);
     }
-
-    const pageUrl = args.url || localServer.url;
-
-    logger.info(`Opening graph page: ${pageUrl}`);
 
     const launchOptions = {
       headless: 'new',
@@ -367,67 +683,31 @@ async function main() {
         '--enable-unsafe-swiftshader',
       ],
     };
-    logger.debug(`Launch options: ${JSON.stringify(launchOptions)}`);
-
-    try {
-      browser = await puppeteer.launch(launchOptions);
-      logger.info('Browser launched successfully.');
-    } catch (error) {
-      if (!isChromiumSandboxLaunchError(error)) {
-        logger.warn(`Browser launch failed: ${formatError(error)}`);
-        throw error;
-      }
-
-      logger.warn(
-        'Chromium sandbox launch failed. Retrying with --no-sandbox --disable-setuid-sandbox.',
-      );
-      const fallbackLaunchOptions = {
-        ...launchOptions,
-        args: [
-          ...launchOptions.args,
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-        ],
-      };
-      logger.debug(`Fallback launch options: ${JSON.stringify(fallbackLaunchOptions)}`);
-      browser = await puppeteer.launch(fallbackLaunchOptions);
-      logger.info('Browser launched with no-sandbox fallback.');
-    }
+    const launchResult = await launchBrowserWithFallbacks({
+      defaultPuppeteer: puppeteer,
+      launchOptions,
+      logger,
+    });
+    browser = launchResult.browser;
+    logger.info(`Browser launched successfully (${launchResult.runtime}).`);
 
     const page = await browser.newPage();
     attachPageDiagnostics(page, logger, args.verbose);
-    logger.debug('Created new page and attached diagnostics listeners.');
 
-    logger.info(`Navigating to graph page (waitUntil=domcontentloaded, timeout=${PAGE_GOTO_TIMEOUT_MS}ms)...`);
+    const pageUrl = args.url || localServer.url;
+    logger.info(`Opening graph page: ${pageUrl}`);
     await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: PAGE_GOTO_TIMEOUT_MS });
-    logger.info('Navigation complete (DOMContentLoaded).');
-    const readyState = await page.evaluate(() => document.readyState);
-    logger.debug(`Document readyState after navigation: ${readyState}`);
-
-    logger.info(`Waiting for window.graphVideo API to be ready (timeout=${GRAPH_API_TIMEOUT_MS}ms)...`);
     await page.waitForFunction(
       () => window.graphVideo && typeof window.graphVideo.runScript === 'function',
       { timeout: GRAPH_API_TIMEOUT_MS },
     );
-    logger.info('window.graphVideo API detected.');
-    if (args.verbose) {
-      const pageState = await page.evaluate(() => ({
-        readyState: document.readyState,
-        hasGraphVideo: Boolean(window.graphVideo),
-        graphVideoKeys: window.graphVideo ? Object.keys(window.graphVideo) : [],
-      }));
-      logger.debug(`Page state after API wait: ${JSON.stringify(pageState)}`);
-    }
 
-    logger.info('Running graphVideo.runScript(...) in page context...');
     const runSummary = await page.evaluate((timelineActions) => {
       return window.graphVideo.runScript(timelineActions);
     }, actions);
-    logger.info('Timeline script injected successfully.');
-    if (args.verbose) {
-      logger.debug(`runScript summary: ${JSON.stringify(runSummary)}`);
-    }
 
+    const initialFrameState = runSummary?.initialFrameState ?? null;
+    logger.debug(`Initial frame state available: ${initialFrameState ? 'yes' : 'no'}`);
     const duration = Number(
       runSummary?.duration ?? (await page.evaluate(() => window.graphVideo.getDuration())),
     );
@@ -439,45 +719,53 @@ async function main() {
     logger.info(`Duration: ${duration.toFixed(3)}s`);
     logger.info(`Rendering ${frameCount} frame(s) at ${args.fps} fps...`);
 
+    if (!frameRoot) {
+      ffmpegEncoder = startFfmpegEncoder(ffmpegPath, args);
+    }
+
     const progressInterval = Math.max(1, Math.floor(frameCount / 20));
+    let previousFrameBuffer = null;
+    let previousFrameSignature = null;
 
     for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
       const t = frameIndex / args.fps;
-      const frameNumber = frameIndex + 1;
-      const framePath = path.join(
-        frameRoot,
-        `frame-${String(frameIndex).padStart(6, '0')}.png`,
-      );
+      const framePath = frameRoot
+        ? path.join(frameRoot, `frame-${String(frameIndex).padStart(6, '0')}.png`)
+        : null;
+      let frameState = initialFrameState;
 
-      if (args.verbose) {
-        logger.debug(`Frame ${frameNumber}/${frameCount}: seek(t=${t.toFixed(4)}) start.`);
-      }
-      const seekStart = Date.now();
-      await page.evaluate((timelineTime) => window.graphVideo.seek(timelineTime), t);
-      if (args.verbose) {
-        logger.debug(`Frame ${frameNumber}/${frameCount}: seek done (${Date.now() - seekStart} ms).`);
+      if (frameIndex > 0) {
+        const seekStart = performance.now();
+        frameState = await page.evaluate((timelineTime) => window.graphVideo.seek(timelineTime), t);
+        timingStats.frameSeekMs += performance.now() - seekStart;
       }
 
-      const captureStart = Date.now();
-      const frameDataUrl = await page.evaluate(() => window.graphVideo.captureFrame());
-      if (args.verbose) {
-        logger.debug(
-          `Frame ${frameNumber}/${frameCount}: capture done (${Date.now() - captureStart} ms).`,
+      const frameSignature = getFrameStateSignature(frameState);
+      if (args.verbose && frameIndex < 3) {
+        logger.debug(`Frame signature ${frameIndex + 1}: ${frameSignature}`);
+      }
+      let pngBuffer = previousFrameBuffer;
+      if (!previousFrameBuffer || frameSignature !== previousFrameSignature) {
+        const captureStart = performance.now();
+        const frameDataUrl = await page.evaluate(
+          () => window.graphVideo.captureFrame({ mimeType: 'image/png' }),
         );
+        pngBuffer = decodeDataUrl(frameDataUrl).buffer;
+        timingStats.frameCaptureMs += performance.now() - captureStart;
+        previousFrameBuffer = pngBuffer;
+        previousFrameSignature = frameSignature;
+      } else {
+        logger.debug(`Reusing PNG buffer for frame ${frameIndex + 1}/${frameCount}`);
       }
 
-      const pngBuffer = decodePngDataUrl(frameDataUrl);
-      if (args.verbose) {
-        logger.debug(`Frame ${frameNumber}/${frameCount}: decoded PNG (${pngBuffer.length} bytes).`);
+      const outputStart = performance.now();
+      if (framePath) {
+        await fs.writeFile(framePath, pngBuffer);
+      } else {
+        await ffmpegEncoder.writeFrame(pngBuffer);
       }
-
-      const writeStart = Date.now();
-      await fs.writeFile(framePath, pngBuffer);
-      if (args.verbose) {
-        logger.debug(
-          `Frame ${frameNumber}/${frameCount}: wrote ${framePath} (${Date.now() - writeStart} ms).`,
-        );
-      }
+      timingStats.frameOutputMs += performance.now() - outputStart;
+      timingStats.frameCount += 1;
 
       if (frameIndex === 0
         || frameIndex === frameCount - 1
@@ -486,48 +774,51 @@ async function main() {
       }
     }
 
-    const generatedFrames = (await fs.readdir(frameRoot))
-      .filter((fileName) => fileName.endsWith('.png'))
-      .length;
-    logger.info(`Generated ${generatedFrames} PNG frame(s) in ${frameRoot}`);
-    if (generatedFrames === 0) {
-      throw new Error(`No PNG frames were generated in ${frameRoot}.`);
+    if (ffmpegEncoder) {
+      logger.info('Finalizing ffmpeg output...');
+      const ffmpegFinalizeStart = performance.now();
+      await ffmpegEncoder.finish();
+      timingStats.ffmpegFinalizeMs = performance.now() - ffmpegFinalizeStart;
+      ffmpegEncoder = null;
+    } else {
+      if (browser) {
+        await browser.close().catch(() => {});
+        browser = null;
+      }
+
+      const ffmpegFinalizeStart = performance.now();
+      await runCommand(ffmpegPath, [
+        '-y',
+        '-threads', '1',
+        '-filter_threads', '1',
+        '-framerate', String(args.fps),
+        '-start_number', '0',
+        '-i', path.join(frameRoot, 'frame-%06d.png'),
+        '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        args.output,
+      ], { stdio: 'inherit' });
+      timingStats.ffmpegFinalizeMs = performance.now() - ffmpegFinalizeStart;
     }
-
-    logger.info('Encoding video with ffmpeg...');
-    logger.debug(`ffmpeg input pattern: ${path.join(frameRoot, 'frame-%06d.png')}`);
-
-    await runCommand('ffmpeg', [
-      '-y',
-      '-framerate', String(args.fps),
-      '-start_number', '0',
-      '-i', path.join(frameRoot, 'frame-%06d.png'),
-      '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
-      '-c:v', 'libx264',
-      '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart',
-      args.output,
-    ], { stdio: 'inherit' });
 
     logger.info(`Video written to ${args.output}`);
+    logTimingSummary(logger, timingStats);
 
-    if (!args.keepFrames) {
+    if (frameRoot && !args.keepFrames) {
       await fs.rm(frameRoot, { recursive: true, force: true });
-      logger.info('Intermediate frames removed.');
-    } else {
-      logger.info(`Frames kept in ${frameRoot}`);
     }
   } finally {
+    if (ffmpegEncoder) {
+      await ffmpegEncoder.abort().catch(() => {});
+    }
     if (browser) {
-      logger.debug('Closing browser...');
-      await browser.close().catch((error) => {
-        logger.warn(`Failed to close browser cleanly: ${formatError(error)}`);
-      });
+      await browser.close().catch(() => {});
     }
     if (localServer?.server) {
-      logger.debug('Stopping local static server...');
       await new Promise((resolve) => localServer.server.close(resolve));
-      logger.debug('Local static server stopped.');
     }
   }
 }

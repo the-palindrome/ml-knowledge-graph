@@ -130,6 +130,17 @@ const VIDEO_CAMERA_TIMELINE_ACTIONS = new Set([
   'autoRotate',
   'zoomTo',
 ]);
+const VIDEO_SCENE_STATE_ACTIONS = new Set([
+  'selectNode',
+  'unselectNode',
+  'focusNode',
+  'highlightNeighbors',
+  'highlightDescendants',
+  'highlightDependencies',
+  'hideGraph',
+  'fadeGraph',
+  'revealGraph',
+]);
 const VIDEO_ORBIT_ACTIONS = new Set(['orbit', 'autoRotate']);
 
 const pathHighlightState = {
@@ -150,6 +161,8 @@ const videoTimelineState = {
   baseCameraState: null,
   active: false,
   currentTime: 0,
+  appliedSceneVersion: null,
+  tooltipLayoutNodeId: null,
 };
 let videoNodeLookupMap = null;
 
@@ -176,9 +189,9 @@ async function init() {
   Renderer.createNodes(graph.nodes);
   Renderer.createEdges(graph.edges, graph.nodes);
 
-  // Compute initial force layout
-  const forcePositions = computeForceLayout(graph.nodes, graph.edges);
-  applyPositions(forcePositions);
+  const cachedInitialLayout = await loadInitialLayoutCache('./knowledge_graph.layout.json');
+  const initialPositions = cachedInitialLayout ?? computeForceLayout(graph.nodes, graph.edges);
+  applyPositions(initialPositions);
   Renderer.updatePositions();
   applyAmbientGraphStyle();
   Renderer.fitCameraToGraph();
@@ -243,6 +256,39 @@ function getFirstSetValue(set) {
 function syncSelectedNodeIdWithSelectionSet() {
   if (!selectedNodeId || !selectedNodeIds.has(selectedNodeId)) {
     selectedNodeId = getFirstSetValue(selectedNodeIds);
+  }
+}
+
+async function loadInitialLayoutCache(url) {
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) {
+      return null;
+    }
+
+    const raw = await response.json();
+    const positionsById = raw?.positions && typeof raw.positions === 'object'
+      ? raw.positions
+      : raw;
+    if (!positionsById || typeof positionsById !== 'object') {
+      return null;
+    }
+
+    const positions = new Map();
+    for (const [nodeId, pos] of Object.entries(positionsById)) {
+      if (!pos || typeof pos !== 'object') continue;
+      const x = Number(pos.x);
+      const y = Number(pos.y);
+      const z = Number(pos.z);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        continue;
+      }
+      positions.set(nodeId, { x, y, z });
+    }
+
+    return positions.size > 0 ? positions : null;
+  } catch {
+    return null;
   }
 }
 
@@ -617,13 +663,15 @@ function handleHover(nodeId, screenX, screenY) {
     if (!hasActiveSelection()) {
       node._hoverRestoreScale = node._currentScale;
       node._currentScale = node._currentScale * 1.35;
-      Renderer.updatePositions();
+      Renderer.updatePositions({ updateEdges: false, updateArrows: false });
     }
 
     container.style.cursor = 'pointer';
   } else {
     hideTooltipImmediately();
-    if (!hasActiveSelection()) Renderer.updatePositions();
+    if (!hasActiveSelection()) {
+      Renderer.updatePositions({ updateEdges: false, updateArrows: false });
+    }
     container.style.cursor = 'default';
   }
 }
@@ -816,7 +864,7 @@ function applySearchState(query, animateSingleMatchCamera) {
   }
 
   Renderer.updateColors(colorMap);
-  Renderer.updatePositions();
+  Renderer.updatePositions({ updateEdges: false, updateArrows: false });
 
   if (matchIds.size > 0 && matchIds.size < graph.nodes.length) {
     Renderer.setEdgeOpacity(SEARCH_EDGE_OPACITY);
@@ -833,11 +881,12 @@ function applySearchState(query, animateSingleMatchCamera) {
   }
 }
 
-function applyAmbientGraphStyle() {
+function applyAmbientGraphStyle(options = {}) {
   applyBaseGraphStyle({
     nodeOpacity: 1,
     edgeOpacity: BASE_EDGE_OPACITY,
     updateNodePositions: false,
+    updateNodeTransforms: options.updateNodeTransforms ?? false,
   });
 }
 
@@ -845,6 +894,7 @@ function applyBaseGraphStyle({
   nodeOpacity,
   edgeOpacity,
   updateNodePositions,
+  updateNodeTransforms = false,
 }) {
   const colorMap = new Map();
   for (const n of graph.nodes) {
@@ -855,7 +905,9 @@ function applyBaseGraphStyle({
   }
   Renderer.updateColors(colorMap);
   if (updateNodePositions) {
-    Renderer.updatePositions();
+    Renderer.updatePositions({ updateEdges: false, updateArrows: false });
+  } else if (updateNodeTransforms) {
+    Renderer.updateNodeTransforms();
   }
   Renderer.setEdgeOpacity(edgeOpacity);
   Renderer.clearHighlightEdges();
@@ -921,14 +973,16 @@ function applySelectionHighlight(selectionContext, options = {}) {
   }
 
   Renderer.updateColors(colorMap);
-  Renderer.updatePositions();
-  Renderer.setEdgeOpacity(SELECTED_CONTEXT_EDGE_OPACITY);
+  Renderer.updateNodeTransforms();
+  Renderer.setEdgeOpacity(videoTimelineState.active ? 0 : SELECTED_CONTEXT_EDGE_OPACITY);
   if (edgeGroups.length > 0) {
     Renderer.showHighlightEdgeGroups(edgeGroups);
   } else {
     Renderer.clearHighlightEdges();
   }
-  updateSelectionInfoPanel(selectionContext);
+  if (!videoTimelineState.active) {
+    updateSelectionInfoPanel(selectionContext);
+  }
 
   if (animateCamera) {
     const cameraNodeId = selectedNodeSet.has(focusNodeId)
@@ -1267,6 +1321,10 @@ function isCameraTimelineAction(actionName) {
   return VIDEO_CAMERA_TIMELINE_ACTIONS.has(actionName);
 }
 
+function isVideoSceneStateAction(actionName) {
+  return VIDEO_SCENE_STATE_ACTIONS.has(actionName);
+}
+
 function normalizeVideoAction(rawAction, index) {
   if (!rawAction || typeof rawAction !== 'object' || Array.isArray(rawAction)) {
     throw new Error(`Action at index ${index} must be an object.`);
@@ -1499,6 +1557,7 @@ function createInitialVideoSeekState() {
     tooltipNodeId: null,
     tooltipOpacity: 1,
     cameraState: cloneCameraState(videoTimelineState.baseCameraState ?? fallbackCameraState),
+    sceneVersion: 0,
   };
 }
 
@@ -1665,6 +1724,10 @@ function applyVideoActionAtTime(state, action, timelineTime) {
     : progress;
   const effectiveElapsed = hasDuration ? action.duration * cameraProgress : 0;
 
+  if (isVideoSceneStateAction(action.action)) {
+    state.sceneVersion += 1;
+  }
+
   switch (action.action) {
     case 'selectNode':
       applyVideoSelectState(state, action);
@@ -1755,7 +1818,8 @@ function applyHiddenGraphStyle() {
   applyBaseGraphStyle({
     nodeOpacity: 0,
     edgeOpacity: 0,
-    updateNodePositions: true,
+    updateNodePositions: false,
+    updateNodeTransforms: true,
   });
 }
 
@@ -1765,6 +1829,7 @@ function applyVideoTooltipState(nodeId, opacity = 1) {
   const node = nodeId ? graph.nodeMap.get(nodeId) : null;
 
   if (!node || clampedOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
+    videoTimelineState.tooltipLayoutNodeId = null;
     hideTooltipImmediately();
     return;
   }
@@ -1777,8 +1842,11 @@ function applyVideoTooltipState(nodeId, opacity = 1) {
     return;
   }
 
-  tooltipLabel.textContent = node.label;
-  updateHoverTooltipGeometry();
+  if (videoTimelineState.tooltipLayoutNodeId !== node.id) {
+    tooltipLabel.textContent = node.label;
+    updateHoverTooltipGeometry();
+    videoTimelineState.tooltipLayoutNodeId = node.id;
+  }
   positionHoverTooltip(screenPos.x, screenPos.y);
   tooltip.classList.add('visible');
   tooltip.setAttribute('aria-hidden', 'false');
@@ -1786,40 +1854,38 @@ function applyVideoTooltipState(nodeId, opacity = 1) {
 }
 
 function applyVideoSeekStateToScene(state, timelineTime) {
-  pathHighlightState.showPrerequisites = state.showPrerequisites;
-  pathHighlightState.showDependents = state.showDependents;
-  UI.setPathHighlightToggleState(pathHighlightState);
+  if (videoTimelineState.appliedSceneVersion !== state.sceneVersion) {
+    pathHighlightState.showPrerequisites = state.showPrerequisites;
+    pathHighlightState.showDependents = state.showDependents;
 
-  selectedNodeIds = new Set(state.selectedNodeIds);
-  selectedNodeId = selectedNodeIds.has(state.focusNodeId)
-    ? state.focusNodeId
-    : getFirstSetValue(selectedNodeIds);
-  hoveredNodeId = null;
-  if (container) container.style.cursor = 'default';
+    selectedNodeIds = new Set(state.selectedNodeIds);
+    selectedNodeId = selectedNodeIds.has(state.focusNodeId)
+      ? state.focusNodeId
+      : getFirstSetValue(selectedNodeIds);
+    hoveredNodeId = null;
+    if (container) container.style.cursor = 'default';
 
-  if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.HIDDEN) {
-    applyHiddenGraphStyle();
-    UI.hideInfoPanel();
-    UI.setPathHighlightToggleEnabled(false);
-  } else if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.CONTEXT && selectedNodeIds.size > 0) {
-    UI.setPathHighlightToggleEnabled(true);
-    const selectionContext = state.contextOverride
-      ? {
-        selectedNodeSet: new Set(state.contextOverride.selectedNodeSet),
-        prerequisiteSet: new Set(state.contextOverride.prerequisiteSet),
-        dependentSet: new Set(state.contextOverride.dependentSet),
-      }
-      : getSelectionContext(selectedNodeIds);
-    selectedNodeIds = selectionContext.selectedNodeSet;
-    syncSelectedNodeIdWithSelectionSet();
-    applySelectionHighlight(selectionContext, {
-      animateCamera: false,
-      focusNodeId: selectedNodeId,
-    });
-  } else {
-    applyAmbientGraphStyle();
-    UI.hideInfoPanel();
-    UI.setPathHighlightToggleEnabled(false);
+    if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.HIDDEN) {
+      applyHiddenGraphStyle();
+    } else if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.CONTEXT && selectedNodeIds.size > 0) {
+      const selectionContext = state.contextOverride
+        ? {
+          selectedNodeSet: new Set(state.contextOverride.selectedNodeSet),
+          prerequisiteSet: new Set(state.contextOverride.prerequisiteSet),
+          dependentSet: new Set(state.contextOverride.dependentSet),
+        }
+        : getSelectionContext(selectedNodeIds);
+      selectedNodeIds = selectionContext.selectedNodeSet;
+      syncSelectedNodeIdWithSelectionSet();
+      applySelectionHighlight(selectionContext, {
+        animateCamera: false,
+        focusNodeId: selectedNodeId,
+      });
+    } else {
+      applyAmbientGraphStyle({ updateNodeTransforms: true });
+    }
+
+    videoTimelineState.appliedSceneVersion = state.sceneVersion;
   }
 
   if (state.cameraState) {
@@ -1834,6 +1900,15 @@ function applyVideoSeekStateToScene(state, timelineTime) {
     duration: videoTimelineState.duration,
     selectedNodeIds: [...selectedNodeIds],
     visibilityMode: state.visibilityMode,
+    sceneVersion: state.sceneVersion,
+    tooltipNodeId: state.tooltipNodeId,
+    tooltipOpacity: state.tooltipOpacity,
+    cameraState: state.cameraState
+      ? {
+        position: { ...state.cameraState.position },
+        target: { ...state.cameraState.target },
+      }
+      : null,
   };
 }
 
@@ -1842,6 +1917,7 @@ function enableVideoRenderMode() {
   Renderer.setAutoRotate(false);
   Renderer.setDeterministicMode(true);
   Renderer.setRenderLoopPaused(true);
+  videoTimelineState.tooltipLayoutNodeId = null;
   hideTooltipImmediately();
 }
 
@@ -1854,13 +1930,16 @@ async function runVideoScript(scriptInput) {
   videoTimelineState.baseCameraState = cloneCameraState(Renderer.getCameraState());
   videoTimelineState.active = true;
   videoTimelineState.currentTime = 0;
+  videoTimelineState.appliedSceneVersion = null;
+  videoTimelineState.tooltipLayoutNodeId = null;
 
   enableVideoRenderMode();
-  await seekVideoTimeline(0);
+  const initialFrameState = await seekVideoTimeline(0);
 
   return {
     duration: videoTimelineState.duration,
     actionCount: videoTimelineState.actions.length,
+    initialFrameState,
   };
 }
 
@@ -1875,11 +1954,15 @@ async function seekVideoTimeline(timeSeconds) {
   return applyVideoSeekStateToScene(nextState, clampedTime);
 }
 
-async function captureVideoFrame() {
+async function captureVideoFrame(options = {}) {
   if (!videoTimelineState.active) {
     throw new Error('No video script loaded. Call graphVideo.runScript(script) first.');
   }
-  return Renderer.captureScreenshot();
+  return Renderer.captureScreenshot({
+    render: false,
+    mimeType: options.mimeType ?? 'image/png',
+    quality: options.quality,
+  });
 }
 
 async function withInitializedGraph(initPromise, errorMessage, action) {
@@ -1899,8 +1982,8 @@ function installGraphVideoApi(initPromise) {
       withGraph('Graph failed to initialize. Cannot run video script.', () => runVideoScript(script)),
     seek: (t) =>
       withGraph('Graph failed to initialize. Cannot seek timeline.', () => seekVideoTimeline(t)),
-    captureFrame: () =>
-      withGraph('Graph failed to initialize. Cannot capture frame.', () => captureVideoFrame()),
+    captureFrame: (options) =>
+      withGraph('Graph failed to initialize. Cannot capture frame.', () => captureVideoFrame(options)),
     getDuration() {
       return videoTimelineState.duration;
     },

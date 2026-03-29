@@ -25,6 +25,13 @@ let deferredArrowRefresh = false;
 let activeCameraAnimation = null;
 let renderLoopStarted = false;
 let renderLoopPaused = false;
+let videoRenderMode = false;
+let pngEncoderWarmed = false;
+let screenshotCanvas = null;
+let screenshotContext = null;
+let videoCaptureStream = null;
+let videoCaptureTrack = null;
+let videoImageCapture = null;
 
 const dummy = new THREE.Object3D();
 const tempColor = new THREE.Color();
@@ -56,13 +63,37 @@ const ARROW_HEIGHT = 2.4;
 const ARROWS_PER_EDGE = 5;
 const ARROW_T_START = 0.08;
 const ARROW_T_END = 0.92;
-const EDGE_CURVE_SEGMENTS = 24;
+const DEFAULT_EDGE_CURVE_SEGMENTS = 24;
+const VIDEO_EDGE_CURVE_SEGMENTS = 4;
 const EDGE_CURVE_STRENGTH_BASE = 0.14;
 const EDGE_CURVE_STRENGTH_VARIANCE = 0.1;
 const EDGE_CURVE_MAX_BEND = 50;
 const EDGE_LINE_WIDTH = 1.2;
 const DEFAULT_MAX_PIXEL_RATIO = 2.0;
 const ANIMATION_PIXEL_RATIO = 1.0;
+const DEFAULT_NODE_GEOMETRY_DETAIL = { widthSegments: 32, heightSegments: 24 };
+const VIDEO_NODE_GEOMETRY_DETAIL = { widthSegments: 6, heightSegments: 4 };
+
+function createNodeGeometry({ widthSegments, heightSegments }) {
+  const geometry = new THREE.SphereGeometry(1, widthSegments, heightSegments);
+  if (nodeOpacityArray) {
+    geometry.setAttribute(
+      "instanceOpacity",
+      new THREE.InstancedBufferAttribute(nodeOpacityArray, 1),
+    );
+  }
+  return geometry;
+}
+
+function getNodeGeometryForCurrentMode() {
+  return createNodeGeometry(
+    videoRenderMode ? VIDEO_NODE_GEOMETRY_DETAIL : DEFAULT_NODE_GEOMETRY_DETAIL,
+  );
+}
+
+function getEdgeCurveSegments() {
+  return videoRenderMode ? VIDEO_EDGE_CURVE_SEGMENTS : DEFAULT_EDGE_CURVE_SEGMENTS;
+}
 
 function smootherStep(t) {
   return t * t * t * (t * (t * 6 - 15) + 10);
@@ -71,6 +102,100 @@ function smootherStep(t) {
 function getTargetPixelRatio() {
   if (animationPerformanceMode) return ANIMATION_PIXEL_RATIO;
   return Math.min(window.devicePixelRatio || 1, DEFAULT_MAX_PIXEL_RATIO);
+}
+
+function warmPngEncoder() {
+  if (pngEncoderWarmed || typeof document === "undefined") return false;
+
+  try {
+    const warmupCanvas = document.createElement("canvas");
+    warmupCanvas.width = 1;
+    warmupCanvas.height = 1;
+
+    const context = warmupCanvas.getContext("2d");
+    if (context) {
+      context.fillStyle = "#000000";
+      context.fillRect(0, 0, 1, 1);
+    }
+    warmupCanvas.toDataURL("image/png");
+  } catch {
+    // Best-effort warmup only; the main capture path remains authoritative.
+  }
+  pngEncoderWarmed = true;
+  return false;
+}
+
+function encodeCanvasToDataUrl(targetCanvas, mimeType, quality) {
+  if (typeof targetCanvas.toBlob !== "function") {
+    return Promise.resolve(targetCanvas.toDataURL(mimeType, quality));
+  }
+
+  return new Promise((resolve, reject) => {
+    targetCanvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Canvas encoding failed."));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read encoded canvas."));
+      reader.readAsDataURL(blob);
+    }, mimeType, quality);
+  });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function getScreenshotCanvas(width, height) {
+  if (!screenshotCanvas) {
+    screenshotCanvas = document.createElement("canvas");
+    screenshotContext = screenshotCanvas.getContext("2d");
+  }
+
+  if (screenshotCanvas.width !== width) {
+    screenshotCanvas.width = width;
+  }
+  if (screenshotCanvas.height !== height) {
+    screenshotCanvas.height = height;
+  }
+
+  return screenshotCanvas;
+}
+
+function ensureVideoImageCapture() {
+  if (
+    videoImageCapture
+    && videoCaptureTrack
+    && videoCaptureTrack.readyState === "live"
+  ) {
+    return videoImageCapture;
+  }
+
+  const sourceCanvas = renderer?.domElement;
+  if (!sourceCanvas || typeof sourceCanvas.captureStream !== "function") {
+    return null;
+  }
+  if (typeof ImageCapture !== "function") {
+    return null;
+  }
+
+  videoCaptureStream = sourceCanvas.captureStream(0);
+  const [track] = videoCaptureStream.getVideoTracks();
+  if (!track) {
+    return null;
+  }
+
+  videoCaptureTrack = track;
+  videoImageCapture = new ImageCapture(track);
+  return videoImageCapture;
 }
 
 export function initRenderer(containerEl) {
@@ -91,7 +216,7 @@ export function initRenderer(containerEl) {
   renderer = new THREE.WebGLRenderer({
     antialias: true,
     alpha: false,
-    preserveDrawingBuffer: true,
+    preserveDrawingBuffer: false,
     powerPreference: "high-performance",
   });
   renderer.setSize(container.clientWidth, container.clientHeight);
@@ -134,7 +259,10 @@ export function createNodes(nodeArray) {
     nodeIdToIndex.set(nodes[i].id, i);
   }
 
-  const geometry = new THREE.SphereGeometry(1, 32, 24);
+  nodeOpacityArray = new Float32Array(nodes.length);
+  nodeOpacityArray.fill(1);
+
+  const geometry = getNodeGeometryForCurrentMode();
   const material = new THREE.MeshBasicMaterial({
     color: 0xffffff,
     transparent: true,
@@ -160,12 +288,6 @@ ${shader.fragmentShader}`.replace(
 
   instancedMesh = new THREE.InstancedMesh(geometry, material, nodes.length);
   instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  nodeOpacityArray = new Float32Array(nodes.length);
-  nodeOpacityArray.fill(1);
-  geometry.setAttribute(
-    "instanceOpacity",
-    new THREE.InstancedBufferAttribute(nodeOpacityArray, 1),
-  );
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
@@ -199,7 +321,7 @@ export function createEdges(edges, nodeArray) {
   }
 
   // Thick line segments via LineMaterial
-  edgePositions = new Float32Array(edgeList.length * EDGE_CURVE_SEGMENTS * 6);
+  edgePositions = new Float32Array(edgeList.length * getEdgeCurveSegments() * 6);
   fillEdgePositions(edgeList, edgePositions);
   const geo = new LineSegmentsGeometry();
   geo.setPositions(edgePositions);
@@ -225,6 +347,7 @@ export function createEdges(edges, nodeArray) {
 }
 
 function fillEdgePositions(list, arr) {
+  const segmentCount = getEdgeCurveSegments();
   let off = 0;
   for (let i = 0; i < list.length; i++) {
     computeCurveFrame(list[i], curveSource, curveControl, curveTarget);
@@ -235,8 +358,8 @@ function fillEdgePositions(list, arr) {
       curveTarget,
       curvePrev,
     );
-    for (let seg = 1; seg <= EDGE_CURVE_SEGMENTS; seg++) {
-      const t = seg / EDGE_CURVE_SEGMENTS;
+    for (let seg = 1; seg <= segmentCount; seg++) {
+      const t = seg / segmentCount;
       evaluateQuadraticPoint(
         t,
         curveSource,
@@ -257,6 +380,18 @@ function fillEdgePositions(list, arr) {
 }
 
 function updateLinePositions(lineMesh, list, arr) {
+  const expectedLength = list.length * getEdgeCurveSegments() * 6;
+  if (arr.length !== expectedLength) {
+    const nextPositions = new Float32Array(expectedLength);
+    fillEdgePositions(list, nextPositions);
+    const previousGeometry = lineMesh.geometry;
+    const nextGeometry = new LineSegmentsGeometry();
+    nextGeometry.setPositions(nextPositions);
+    lineMesh.geometry = nextGeometry;
+    previousGeometry.dispose();
+    return nextPositions;
+  }
+
   fillEdgePositions(list, arr);
 
   const geometry = lineMesh.geometry;
@@ -268,10 +403,11 @@ function updateLinePositions(lineMesh, list, arr) {
     instanceStart.data.array.set(arr);
     instanceStart.data.needsUpdate = true;
     geometry.boundingSphere = null;
-    return;
+    return arr;
   }
 
   geometry.setPositions(arr);
+  return arr;
 }
 
 function makeArrowGeometry(radius, height) {
@@ -302,11 +438,11 @@ function forEachEdgeLayer(visitor) {
 
 function updateEdgeLayer(layer, { updateEdges, updateArrows }) {
   if (updateEdges && layer.lines && layer.edgeList && layer.positions) {
-    updateLinePositions(layer.lines, layer.edgeList, layer.positions);
+    layer.positions = updateLinePositions(layer.lines, layer.edgeList, layer.positions);
   }
 
   if (layer.arrows && layer.edgeList) {
-    if (updateArrows && !animationPerformanceMode) {
+    if (updateArrows && !animationPerformanceMode && !videoRenderMode) {
       positionArrows(layer.arrows, layer.edgeList);
     } else {
       deferredArrowRefresh = true;
@@ -334,7 +470,7 @@ function buildEdgeArrows() {
   edgeArrows = new THREE.InstancedMesh(coneGeo, coneMat, totalArrows);
   edgeArrows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   positionArrows(edgeArrows, edgeList);
-  edgeArrows.visible = !animationPerformanceMode;
+  edgeArrows.visible = !videoRenderMode && !animationPerformanceMode;
   scene.add(edgeArrows);
 }
 
@@ -458,9 +594,7 @@ function createEdgeDescriptor(si, ti) {
 
 // --- Position / visual updates ---
 
-export function updatePositions(options = {}) {
-  const updateArrows = options.updateArrows ?? !animationPerformanceMode;
-  const updateEdges = options.updateEdges ?? true;
+export function updateNodeTransforms() {
   if (!instancedMesh || !nodes) return;
 
   for (let i = 0; i < nodes.length; i++) {
@@ -472,6 +606,12 @@ export function updatePositions(options = {}) {
   }
   instancedMesh.instanceMatrix.needsUpdate = true;
   instancedMesh.boundingSphere = null; // invalidate so raycaster recomputes after layout change
+}
+
+export function updatePositions(options = {}) {
+  const updateArrows = options.updateArrows ?? !animationPerformanceMode;
+  const updateEdges = options.updateEdges ?? true;
+  updateNodeTransforms();
 
   forEachEdgeLayer((layer) => {
     updateEdgeLayer(layer, { updateEdges, updateArrows });
@@ -501,7 +641,11 @@ export function updateColors(colorMap) {
 
 export function setEdgeOpacity(opacity) {
   if (edgeMat) edgeMat.opacity = opacity;
-  if (edgeArrows) edgeArrows.material.opacity = opacity;
+  if (edgeLines) edgeLines.visible = opacity > 0.001;
+  if (edgeArrows) {
+    edgeArrows.material.opacity = opacity;
+    edgeArrows.visible = opacity > 0.001 && !videoRenderMode && !animationPerformanceMode;
+  }
 }
 
 // --- Highlight edges ---
@@ -551,7 +695,7 @@ function createHighlightLayer(
   linewidth = EDGE_LINE_WIDTH,
   opacity = 0.6,
 ) {
-  const positions = new Float32Array(pairs.length * EDGE_CURVE_SEGMENTS * 6);
+  const positions = new Float32Array(pairs.length * getEdgeCurveSegments() * 6);
   fillEdgePositions(pairs, positions);
   const geo = new LineSegmentsGeometry();
   geo.setPositions(positions);
@@ -591,7 +735,7 @@ function createHighlightLayer(
   arrows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   arrows.renderOrder = 1;
   positionArrows(arrows, pairs);
-  arrows.visible = !animationPerformanceMode;
+  arrows.visible = !videoRenderMode && !animationPerformanceMode;
   scene.add(arrows);
 
   return {
@@ -747,6 +891,32 @@ export function setDeterministicMode(enabled) {
   controls.update();
 }
 
+export function setVideoRenderMode(enabled) {
+  const nextMode = Boolean(enabled);
+  if (videoRenderMode === nextMode) return;
+  videoRenderMode = nextMode;
+
+  if (instancedMesh) {
+    const previousGeometry = instancedMesh.geometry;
+    instancedMesh.geometry = getNodeGeometryForCurrentMode();
+    previousGeometry.dispose();
+    instancedMesh.geometry.attributes.instanceOpacity.needsUpdate = true;
+  }
+
+  forEachEdgeLayer((layer) => {
+    if (layer.lines && layer.edgeList && layer.positions) {
+      layer.positions = updateLinePositions(layer.lines, layer.edgeList, layer.positions);
+    }
+    if (layer.arrows) {
+      layer.arrows.visible = !videoRenderMode && !animationPerformanceMode;
+    }
+  });
+
+  if (renderer) {
+    onResize();
+  }
+}
+
 export function getCameraState() {
   if (!camera || !controls) {
     return null;
@@ -815,10 +985,35 @@ export function startRenderLoop() {
   animate();
 }
 
-export function captureScreenshot() {
-  // Render one frame with preserveDrawingBuffer behavior
-  renderFrame({ updateControls: false });
-  return renderer.domElement.toDataURL("image/png");
+export async function captureVideoFrame(options = {}) {
+  const {
+    render = true,
+    mimeType = "image/png",
+    quality,
+  } = options;
+
+  if (render) {
+    renderFrame({ updateControls: false });
+  }
+  return encodeCanvasToDataUrl(renderer.domElement, mimeType, quality);
+}
+
+export function captureScreenshot(options = {}) {
+  const {
+    render = true,
+    mimeType = "image/png",
+    quality,
+  } = options;
+
+  if (render) {
+    // Render one frame with preserveDrawingBuffer behavior.
+    renderFrame({ updateControls: false });
+  }
+  const sourceCanvas = renderer.domElement;
+  const targetCanvas = getScreenshotCanvas(sourceCanvas.width, sourceCanvas.height);
+  screenshotContext.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
+
+  return targetCanvas.toDataURL(mimeType, quality);
 }
 
 export function getContainer() {

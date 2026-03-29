@@ -62,3 +62,6 @@ frames/
 *.mov
 *.avi
 *.mkv
+
+# Local graph layout cache
+knowledge_graph.layout.json
