@@ -51,15 +51,18 @@ const cameraSetTarget = new THREE.Vector3();
 const cameraStatePosition = new THREE.Vector3();
 const cameraStateTarget = new THREE.Vector3();
 
-const ARROW_RADIUS = 1.2;
-const ARROW_HEIGHT = 3.8;
-const EDGE_CURVE_SEGMENTS = 10;
+const ARROW_RADIUS = 1.0;
+const ARROW_HEIGHT = 2.4;
+const ARROWS_PER_EDGE = 5;
+const ARROW_T_START = 0.08;
+const ARROW_T_END = 0.92;
+const EDGE_CURVE_SEGMENTS = 24;
 const EDGE_CURVE_STRENGTH_BASE = 0.14;
 const EDGE_CURVE_STRENGTH_VARIANCE = 0.1;
 const EDGE_CURVE_MAX_BEND = 50;
 const EDGE_LINE_WIDTH = 1.2;
-const DEFAULT_MAX_PIXEL_RATIO = 1.3;
-const ANIMATION_PIXEL_RATIO = 0.8;
+const DEFAULT_MAX_PIXEL_RATIO = 2.0;
+const ANIMATION_PIXEL_RATIO = 1.0;
 
 function smootherStep(t) {
   return t * t * t * (t * (t * 6 - 15) + 10);
@@ -131,7 +134,7 @@ export function createNodes(nodeArray) {
     nodeIdToIndex.set(nodes[i].id, i);
   }
 
-  const geometry = new THREE.SphereGeometry(1, 12, 9);
+  const geometry = new THREE.SphereGeometry(1, 32, 24);
   const material = new THREE.MeshBasicMaterial({
     color: 0xffffff,
     transparent: true,
@@ -271,6 +274,13 @@ function updateLinePositions(lineMesh, list, arr) {
   geometry.setPositions(arr);
 }
 
+function makeArrowGeometry(radius, height) {
+  const geo = new THREE.ConeGeometry(radius, height, 3);
+  // Shift so the tip (apex) is at local origin — body extends down -Y
+  geo.translate(0, -height / 2, 0);
+  return geo;
+}
+
 function buildEdgeArrows() {
   if (edgeArrows) {
     scene.remove(edgeArrows);
@@ -278,9 +288,7 @@ function buildEdgeArrows() {
     edgeArrows.material.dispose();
   }
 
-  const coneGeo = new THREE.ConeGeometry(ARROW_RADIUS, ARROW_HEIGHT, 3);
-  // Shift so the tip (apex) is at local origin — body extends down -Y
-  coneGeo.translate(0, -ARROW_HEIGHT / 2, 0);
+  const coneGeo = makeArrowGeometry(ARROW_RADIUS, ARROW_HEIGHT);
 
   const coneMat = new THREE.MeshBasicMaterial({
     color: 0x2f353d,
@@ -289,7 +297,8 @@ function buildEdgeArrows() {
     depthWrite: false,
   });
 
-  edgeArrows = new THREE.InstancedMesh(coneGeo, coneMat, edgeList.length);
+  const totalArrows = edgeList.length * ARROWS_PER_EDGE;
+  edgeArrows = new THREE.InstancedMesh(coneGeo, coneMat, totalArrows);
   edgeArrows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   positionArrows(edgeArrows, edgeList);
   edgeArrows.visible = !animationPerformanceMode;
@@ -297,48 +306,54 @@ function buildEdgeArrows() {
 }
 
 function positionArrows(arrowMesh, list) {
+  let instanceIdx = 0;
   for (let i = 0; i < list.length; i++) {
     const edge = list[i];
     const len = computeCurveFrame(edge, curveSource, curveControl, curveTarget);
-    if (len < 0.001) {
-      dummy.scale.setScalar(0);
-      dummy.position.set(0, 0, 0);
-      dummy.updateMatrix();
-      arrowMesh.setMatrixAt(i, dummy.matrix);
-      continue;
-    }
 
-    const arrowT = edge.arrowT ?? 0.6;
-    evaluateQuadraticPoint(
-      arrowT,
-      curveSource,
-      curveControl,
-      curveTarget,
-      arrowPos,
-    );
-    evaluateQuadraticTangent(
-      arrowT,
-      curveSource,
-      curveControl,
-      curveTarget,
-      arrowDir,
-    );
-    const arrowDirLength = arrowDir.length();
-    if (arrowDirLength < 0.001) {
-      dummy.scale.setScalar(0);
-      dummy.position.set(0, 0, 0);
-      dummy.updateMatrix();
-      arrowMesh.setMatrixAt(i, dummy.matrix);
-      continue;
-    }
-    arrowDir.divideScalar(arrowDirLength);
+    for (let a = 0; a < ARROWS_PER_EDGE; a++) {
+      if (len < 0.001) {
+        dummy.scale.setScalar(0);
+        dummy.position.set(0, 0, 0);
+        dummy.updateMatrix();
+        arrowMesh.setMatrixAt(instanceIdx++, dummy.matrix);
+        continue;
+      }
 
-    dummy.position.copy(arrowPos);
-    // Orient cone so +Y (tip direction) follows edge flow
-    dummy.quaternion.setFromUnitVectors(upVec, arrowDir);
-    dummy.scale.setScalar(1);
-    dummy.updateMatrix();
-    arrowMesh.setMatrixAt(i, dummy.matrix);
+      const t =
+        ARROW_T_START +
+        (a / (ARROWS_PER_EDGE - 1)) * (ARROW_T_END - ARROW_T_START);
+      evaluateQuadraticPoint(
+        t,
+        curveSource,
+        curveControl,
+        curveTarget,
+        arrowPos,
+      );
+      evaluateQuadraticTangent(
+        t,
+        curveSource,
+        curveControl,
+        curveTarget,
+        arrowDir,
+      );
+      const arrowDirLength = arrowDir.length();
+      if (arrowDirLength < 0.001) {
+        dummy.scale.setScalar(0);
+        dummy.position.set(0, 0, 0);
+        dummy.updateMatrix();
+        arrowMesh.setMatrixAt(instanceIdx++, dummy.matrix);
+        continue;
+      }
+      arrowDir.divideScalar(arrowDirLength);
+
+      dummy.position.copy(arrowPos);
+      // Orient cone so +Y (tip direction) follows edge flow
+      dummy.quaternion.setFromUnitVectors(upVec, arrowDir);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      arrowMesh.setMatrixAt(instanceIdx++, dummy.matrix);
+    }
   }
   arrowMesh.instanceMatrix.needsUpdate = true;
 }
@@ -411,7 +426,6 @@ function createEdgeDescriptor(si, ti) {
     ti,
     curvePhase: ((hash & 1023) / 1023) * Math.PI * 2,
     curveStrength: ((hash >>> 10) & 255) / 255,
-    arrowT: 0.48 + (((hash >>> 18) & 255) / 255) * 0.24,
   };
 }
 
@@ -558,8 +572,7 @@ function createHighlightLayer(
   // Highlight arrowheads (slightly larger)
   const hlRadius = ARROW_RADIUS * 1.4;
   const hlHeight = ARROW_HEIGHT * 1.4;
-  const coneGeo = new THREE.ConeGeometry(hlRadius, hlHeight, 3);
-  coneGeo.translate(0, -hlHeight / 2, 0);
+  const coneGeo = makeArrowGeometry(hlRadius, hlHeight);
 
   const coneMat = new THREE.MeshBasicMaterial({
     color: new THREE.Color(colorHex),
@@ -568,7 +581,8 @@ function createHighlightLayer(
     depthWrite: false,
   });
 
-  const arrows = new THREE.InstancedMesh(coneGeo, coneMat, pairs.length);
+  const totalArrows = pairs.length * ARROWS_PER_EDGE;
+  const arrows = new THREE.InstancedMesh(coneGeo, coneMat, totalArrows);
   arrows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   arrows.renderOrder = 1;
   positionArrows(arrows, pairs);
