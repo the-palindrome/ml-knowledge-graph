@@ -1,0 +1,195 @@
+[
+  {
+    "at": 0.0,
+    "action": "hideGraph"
+  },
+  {
+    "at": 0.35,
+    "action": "focusNode",
+    "nodeId": "gpt",
+    "duration": 1.4,
+    "distance": 95,
+    "highlightPrerequisites": false,
+    "highlightDependents": false
+  },
+  {
+    "at": 0.35,
+    "action": "highlightDependencies",
+    "nodeId": "gpt",
+    "level": 0
+  },
+  {
+    "at": 1.65,
+    "action": "openTooltip",
+    "nodeId": "gpt",
+    "opacity": 1
+  },
+  {
+    "at": 2.4,
+    "action": "highlightDependencies",
+    "nodeId": "gpt",
+    "level": 1
+  },
+  {
+    "at": 2.4,
+    "action": "zoomTo",
+    "distance": 210,
+    "duration": 1.6,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 4.15,
+    "action": "openTooltip",
+    "nodeId": "causal language model",
+    "opacity": 1
+  },
+  {
+    "at": 4.85,
+    "action": "openTooltip",
+    "nodeId": "pre-training",
+    "opacity": 1
+  },
+  {
+    "at": 5.4,
+    "action": "highlightDependencies",
+    "nodeId": "gpt",
+    "level": 4
+  },
+  {
+    "at": 5.4,
+    "action": "openTooltip",
+    "nodeId": "transformer",
+    "opacity": 1
+  },
+  {
+    "at": 5.4,
+    "action": "cameraFocus",
+    "nodeId": "transformer",
+    "distance": 210,
+    "duration": 1.25,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 6.65,
+    "action": "openTooltip",
+    "nodeId": "autoregressive model",
+    "opacity": 1
+  },
+  {
+    "at": 6.65,
+    "action": "cameraFocus",
+    "nodeId": "autoregressive model",
+    "distance": 210,
+    "duration": 1.05,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 7.7,
+    "action": "openTooltip",
+    "nodeId": "neural network",
+    "opacity": 1
+  },
+  {
+    "at": 7.7,
+    "action": "cameraFocus",
+    "nodeId": "neural network",
+    "distance": 210,
+    "duration": 0.9,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 8.6,
+    "action": "openTooltip",
+    "nodeId": "multi-head attention",
+    "opacity": 1
+  },
+  {
+    "at": 8.6,
+    "action": "cameraFocus",
+    "nodeId": "multi-head attention",
+    "distance": 210,
+    "duration": 0.78,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 9.38,
+    "action": "openTooltip",
+    "nodeId": "self-attention",
+    "opacity": 1
+  },
+  {
+    "at": 9.38,
+    "action": "cameraFocus",
+    "nodeId": "self-attention",
+    "distance": 210,
+    "duration": 0.66,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 10.04,
+    "action": "openTooltip",
+    "nodeId": "token embedding",
+    "opacity": 1
+  },
+  {
+    "at": 10.04,
+    "action": "cameraFocus",
+    "nodeId": "token embedding",
+    "distance": 210,
+    "duration": 0.56,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 10.6,
+    "action": "openTooltip",
+    "nodeId": "backpropagation",
+    "opacity": 1
+  },
+  {
+    "at": 10.6,
+    "action": "cameraFocus",
+    "nodeId": "backpropagation",
+    "distance": 210,
+    "duration": 0.48,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 11.08,
+    "action": "openTooltip",
+    "nodeId": "gradient descent",
+    "opacity": 1
+  },
+  {
+    "at": 11.08,
+    "action": "cameraFocus",
+    "nodeId": "gradient descent",
+    "distance": 210,
+    "duration": 0.42,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 11.8,
+    "action": "closeTooltip",
+    "duration": 0.2
+  },
+  {
+    "at": 12.1,
+    "action": "cameraFocus",
+    "target": [0, 0, 0],
+    "distance": 1100,
+    "duration": 2.6,
+    "easing": "ease-in-out"
+  },
+  {
+    "at": 14.9,
+    "action": "fadeGraph"
+  },
+  {
+    "at": 15.0,
+    "action": "autoRotate",
+    "axis": "y",
+    "speed": 0.16,
+    "duration": 7.0,
+    "easing": "linear"
+  }
+]
