@@ -2180,7 +2180,7 @@ async function captureVideoFrame(options = {}) {
   const sourceCanvas = container?.querySelector('canvas');
   if (!sourceCanvas) {
     return Renderer.captureScreenshot({
-      render: false,
+      render: true,
       mimeType: options.mimeType ?? 'image/png',
       quality: options.quality,
     });
@@ -2189,22 +2189,20 @@ async function captureVideoFrame(options = {}) {
   const targetCanvas = getVideoCaptureCanvas(sourceCanvas.width, sourceCanvas.height);
   if (!videoCaptureContext) {
     return Renderer.captureScreenshot({
-      render: false,
+      render: true,
       mimeType: options.mimeType ?? 'image/png',
       quality: options.quality,
     });
   }
-  videoCaptureContext.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
-  videoCaptureContext.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
 
-  const drewTooltip = drawTooltipIntoCapture(sourceCanvas, targetCanvas);
-  if (!drewTooltip) {
-    return Renderer.captureScreenshot({
-      render: false,
-      mimeType: options.mimeType ?? 'image/png',
-      quality: options.quality,
-    });
-  }
+  const captureIntoTargetCanvas = () => {
+    Renderer.renderFrame({ updateControls: false });
+    videoCaptureContext.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+    videoCaptureContext.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
+    drawTooltipIntoCapture(sourceCanvas, targetCanvas);
+  };
+
+  captureIntoTargetCanvas();
 
   return encodeCanvasToDataUrl(
     targetCanvas,
