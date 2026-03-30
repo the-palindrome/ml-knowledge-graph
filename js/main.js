@@ -58,6 +58,8 @@ const METRIC_NODE_SCALE_MIN_FACTOR = 0.75;
 const METRIC_NODE_SCALE_MAX_FACTOR = 1.9;
 const TOOLTIP_MARGIN = 14;
 const TOOLTIP_MIN_WIDTH = 120;
+const TOOLTIP_CONNECTOR_SOURCE_X = 4;
+const TOOLTIP_CONNECTOR_JOINT_X = 22;
 const VIDEO_DURATION_EPSILON = 1e-6;
 const VIDEO_ORBIT_TURN_TO_RADIANS = Math.PI * 2;
 const VIDEO_TOOLTIP_HIDDEN_OPACITY = 0.001;
@@ -171,6 +173,7 @@ let videoNodeLookupMap = null;
 window.addEventListener('resize', () => {
   if (!hoveredNodeId) return;
   updateHoverTooltipGeometry();
+  syncHoveredTooltipPosition();
 });
 
 // --- Bootstrap ---
@@ -188,6 +191,7 @@ async function init() {
 
   container = document.getElementById('canvas-container');
   Renderer.initRenderer(container);
+  Renderer.setPostRenderCallback(syncHoveredTooltipPosition);
   Renderer.createNodes(graph.nodes);
   Renderer.createEdges(graph.edges, graph.nodes);
 
@@ -635,7 +639,10 @@ function handleNodeSizingModeChange(nextMode) {
 function handleHover(nodeId, screenX, screenY) {
   if (hoveredNodeId === nodeId) {
     if (nodeId) {
-      positionHoverTooltip(screenX, screenY);
+      const hoverAnchor = getHoverTooltipAnchor(nodeId, screenX, screenY);
+      if (hoverAnchor) {
+        positionHoverTooltip(hoverAnchor.x, hoverAnchor.y);
+      }
     }
     return;
   }
@@ -657,7 +664,10 @@ function handleHover(nodeId, screenX, screenY) {
       tooltipLabel.textContent = node.label;
       updateHoverTooltipGeometry();
     }
-    positionHoverTooltip(screenX, screenY);
+    const hoverAnchor = getHoverTooltipAnchor(nodeId, screenX, screenY);
+    if (hoverAnchor) {
+      positionHoverTooltip(hoverAnchor.x, hoverAnchor.y);
+    }
     tooltip.classList.add('visible');
     tooltip.setAttribute('aria-hidden', 'false');
     tooltip.style.opacity = '';
@@ -678,6 +688,76 @@ function handleHover(nodeId, screenX, screenY) {
   }
 }
 
+function getHoverTooltipAnchor(nodeId, fallbackX, fallbackY) {
+  if (nodeId) {
+    const projected = Renderer.projectToScreen(nodeId);
+    if (projected && !projected.behind) {
+      return {
+        x: projected.x,
+        y: projected.y,
+      };
+    }
+  }
+
+  if (Number.isFinite(fallbackX) && Number.isFinite(fallbackY)) {
+    return {
+      x: fallbackX,
+      y: fallbackY,
+    };
+  }
+
+  return null;
+}
+
+function syncHoveredTooltipPosition() {
+  if (!hoveredNodeId || !tooltip || tooltip.getAttribute('aria-hidden') === 'true') {
+    return;
+  }
+
+  const hoverAnchor = getHoverTooltipAnchor(hoveredNodeId);
+  if (!hoverAnchor) {
+    return;
+  }
+
+  positionHoverTooltip(hoverAnchor.x, hoverAnchor.y);
+}
+
+function updateTooltipConnectorPath(sourceX, sourceY) {
+  if (!tooltip || !tooltipConnectorPath) {
+    return;
+  }
+
+  const labelX = Number(tooltip.dataset.tipLabelX);
+  const labelWidth = Number(tooltip.dataset.tipLabelWidth);
+  const baselineY = Number(tooltip.dataset.tipBaselineY);
+  const jointX = Number(tooltip.dataset.tipJointX);
+  const baseSourceX = Number(tooltip.dataset.tipBaseSourceX);
+  const baseSourceY = Number(tooltip.dataset.tipBaseSourceY);
+
+  if (!Number.isFinite(labelX) || !Number.isFinite(labelWidth) || !Number.isFinite(baselineY)) {
+    return;
+  }
+
+  const resolvedJointX = Number.isFinite(jointX) ? jointX : TOOLTIP_CONNECTOR_JOINT_X;
+  const resolvedSourceX = Number.isFinite(sourceX)
+    ? sourceX
+    : (Number.isFinite(baseSourceX) ? baseSourceX : TOOLTIP_CONNECTOR_SOURCE_X);
+  const resolvedSourceY = Number.isFinite(sourceY)
+    ? sourceY
+    : (Number.isFinite(baseSourceY) ? baseSourceY : baselineY);
+
+  const connectorPath = [
+    `M ${resolvedSourceX} ${resolvedSourceY}`,
+    `L ${resolvedJointX} ${baselineY}`,
+    `L ${labelX} ${baselineY}`,
+    `L ${labelX + labelWidth} ${baselineY}`,
+  ].join(' ');
+
+  tooltipConnectorPath.setAttribute('d', connectorPath);
+  const connectorLength = tooltipConnectorPath.getTotalLength();
+  tooltipConnectorPath.style.setProperty('--path-len', `${connectorLength}`);
+}
+
 function updateHoverTooltipGeometry() {
   if (!tooltip || !tooltipLabel || !tooltipShape || !tooltipBackdropPath || !tooltipConnectorPath) {
     return;
@@ -688,9 +768,9 @@ function updateHoverTooltipGeometry() {
   const labelWidth = Math.max(1, Math.ceil(tooltipLabel.offsetWidth));
   const labelHeight = Math.max(1, Math.ceil(tooltipLabel.offsetHeight));
   const baselineY = labelY + labelHeight + 2;
-  const sourceX = 4;
+  const sourceX = TOOLTIP_CONNECTOR_SOURCE_X;
   const sourceY = Math.max(7, baselineY - 34);
-  const jointX = 22;
+  const jointX = TOOLTIP_CONNECTOR_JOINT_X;
   const width = Math.ceil(labelX + labelWidth + 14);
   const height = Math.ceil(Math.max(labelY + labelHeight + 12, baselineY + 14));
 
@@ -703,13 +783,13 @@ function updateHoverTooltipGeometry() {
   tooltipShape.setAttribute('width', `${width}`);
   tooltipShape.setAttribute('height', `${height}`);
 
-  const connectorPath = [
-    `M ${sourceX} ${sourceY}`,
-    `L ${jointX} ${baselineY}`,
-    `L ${labelX} ${baselineY}`,
-    `L ${labelX + labelWidth} ${baselineY}`,
-  ].join(' ');
-  tooltipConnectorPath.setAttribute('d', connectorPath);
+  tooltip.dataset.tipLabelX = `${labelX}`;
+  tooltip.dataset.tipLabelWidth = `${labelWidth}`;
+  tooltip.dataset.tipBaselineY = `${baselineY}`;
+  tooltip.dataset.tipJointX = `${jointX}`;
+  tooltip.dataset.tipBaseSourceX = `${sourceX}`;
+  tooltip.dataset.tipBaseSourceY = `${sourceY}`;
+  updateTooltipConnectorPath(sourceX, sourceY);
 
   const inset = 1.5;
   const backdropPath = [
@@ -720,32 +800,36 @@ function updateHoverTooltipGeometry() {
     'Z',
   ].join(' ');
   tooltipBackdropPath.setAttribute('d', backdropPath);
-
-  const connectorLength = tooltipConnectorPath.getTotalLength();
-  tooltipConnectorPath.style.setProperty('--path-len', `${connectorLength}`);
 }
 
 function positionHoverTooltip(screenX, screenY) {
+  if (!tooltip) {
+    return;
+  }
+
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
   const tooltipWidth = Math.max(tooltip.offsetWidth, TOOLTIP_MIN_WIDTH);
   const tooltipHeight = Math.max(tooltip.offsetHeight, 46);
+  const baseSourceX = Number(tooltip.dataset.tipBaseSourceX);
+  const baseSourceY = Number(tooltip.dataset.tipBaseSourceY);
+  const sourceX = Number.isFinite(baseSourceX) ? baseSourceX : TOOLTIP_CONNECTOR_SOURCE_X;
+  const sourceY = Number.isFinite(baseSourceY) ? baseSourceY : 7;
 
-  let left = screenX + 6;
-  let top = screenY - 6;
+  const preferredLeft = screenX - sourceX;
+  const preferredTop = screenY - sourceY;
+  const maxLeft = Math.max(TOOLTIP_MARGIN, viewportWidth - tooltipWidth - TOOLTIP_MARGIN);
+  const maxTop = Math.max(TOOLTIP_MARGIN, viewportHeight - tooltipHeight - TOOLTIP_MARGIN);
 
-  left = Math.min(left, viewportWidth - tooltipWidth - TOOLTIP_MARGIN);
-  left = Math.max(left, TOOLTIP_MARGIN);
+  const left = Math.min(Math.max(preferredLeft, TOOLTIP_MARGIN), maxLeft);
+  const top = Math.min(Math.max(preferredTop, TOOLTIP_MARGIN), maxTop);
 
-  if (top + tooltipHeight + TOOLTIP_MARGIN > viewportHeight) {
-    top = viewportHeight - tooltipHeight - TOOLTIP_MARGIN;
-  }
-  if (top < TOOLTIP_MARGIN) {
-    top = TOOLTIP_MARGIN;
-  }
+  const sourceOffsetX = preferredLeft - left;
+  const sourceOffsetY = preferredTop - top;
 
   tooltip.style.left = `${left}px`;
   tooltip.style.top = `${top}px`;
+  updateTooltipConnectorPath(sourceX + sourceOffsetX, sourceY + sourceOffsetY);
 }
 
 // --- Click: selection + path highlighting ---

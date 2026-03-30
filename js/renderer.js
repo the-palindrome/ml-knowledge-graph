@@ -26,6 +26,7 @@ let activeCameraAnimation = null;
 let renderLoopStarted = false;
 let renderLoopPaused = false;
 let videoRenderMode = false;
+let postRenderCallback = null;
 let pngEncoderWarmed = false;
 let screenshotCanvas = null;
 let screenshotContext = null;
@@ -965,10 +966,17 @@ export function renderFrame({ updateControls = true } = {}) {
     controls.update();
   }
   renderer.render(scene, camera);
+  if (postRenderCallback) {
+    postRenderCallback();
+  }
 }
 
 export function setRenderLoopPaused(paused) {
   renderLoopPaused = Boolean(paused);
+}
+
+export function setPostRenderCallback(callback) {
+  postRenderCallback = typeof callback === 'function' ? callback : null;
 }
 
 // --- Render loop ---
