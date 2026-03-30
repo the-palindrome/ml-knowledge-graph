@@ -20,6 +20,8 @@ let selectedNodeIds = new Set();
 let hoveredNodeId = null;
 let isAnimating = false;
 let container = null;
+let videoCaptureCanvas = null;
+let videoCaptureContext = null;
 
 const tooltip = document.getElementById('tooltip');
 const tooltipLabel = document.getElementById('tooltip-label');
@@ -1814,6 +1816,138 @@ function hideTooltipImmediately() {
   tooltip.style.opacity = '';
 }
 
+function getVideoCaptureCanvas(width, height) {
+  if (!videoCaptureCanvas) {
+    videoCaptureCanvas = document.createElement('canvas');
+    videoCaptureContext = videoCaptureCanvas.getContext('2d');
+  }
+
+  if (videoCaptureCanvas.width !== width) {
+    videoCaptureCanvas.width = width;
+  }
+  if (videoCaptureCanvas.height !== height) {
+    videoCaptureCanvas.height = height;
+  }
+
+  return videoCaptureCanvas;
+}
+
+function encodeCanvasToDataUrl(targetCanvas, mimeType = 'image/png', quality) {
+  if (typeof targetCanvas.toBlob !== 'function') {
+    return Promise.resolve(targetCanvas.toDataURL(mimeType, quality));
+  }
+
+  return new Promise((resolve, reject) => {
+    targetCanvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('Canvas encoding failed.'));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(reader.error ?? new Error('Failed to read encoded canvas.'));
+      reader.readAsDataURL(blob);
+    }, mimeType, quality);
+  });
+}
+
+function parseCssNumber(value, fallback = 0) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildCanvasFontString(style) {
+  const fontParts = [
+    style.fontStyle,
+    style.fontVariant,
+    style.fontWeight,
+    style.fontSize,
+    style.fontFamily,
+  ].filter(Boolean);
+  return fontParts.join(' ');
+}
+
+function drawTooltipIntoCapture(sourceCanvas, targetCanvas) {
+  if (!tooltip || !tooltipLabel || !tooltipBackdropPath || !tooltipConnectorPath || !videoCaptureContext) {
+    return false;
+  }
+  if (tooltip.getAttribute('aria-hidden') === 'true') {
+    return false;
+  }
+
+  const tooltipStyles = getComputedStyle(tooltip);
+  const tooltipOpacity = clamp01(parseCssNumber(tooltipStyles.opacity, 1));
+  if (tooltipOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
+    return false;
+  }
+
+  const sourceRect = sourceCanvas.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  if (tooltipRect.width <= 0 || tooltipRect.height <= 0 || sourceRect.width <= 0 || sourceRect.height <= 0) {
+    return false;
+  }
+
+  const scaleX = targetCanvas.width / sourceRect.width;
+  const scaleY = targetCanvas.height / sourceRect.height;
+  const offsetX = tooltipRect.left - sourceRect.left;
+  const offsetY = tooltipRect.top - sourceRect.top;
+
+  const backdropPathData = tooltipBackdropPath.getAttribute('d');
+  const connectorPathData = tooltipConnectorPath.getAttribute('d');
+  const backdropStyles = getComputedStyle(tooltipBackdropPath);
+  const connectorStyles = getComputedStyle(tooltipConnectorPath);
+  const labelStyles = getComputedStyle(tooltipLabel);
+  const labelOpacity = clamp01(parseCssNumber(labelStyles.opacity, 1));
+  const labelText = tooltipLabel.textContent ?? '';
+
+  videoCaptureContext.save();
+  videoCaptureContext.scale(scaleX, scaleY);
+  videoCaptureContext.translate(offsetX, offsetY);
+
+  if (backdropPathData) {
+    videoCaptureContext.save();
+    videoCaptureContext.globalAlpha = tooltipOpacity;
+    videoCaptureContext.fillStyle = backdropStyles.fill || 'rgba(3, 6, 12, 0.8)';
+    videoCaptureContext.shadowColor = 'rgba(0, 0, 0, 0.42)';
+    videoCaptureContext.shadowBlur = 18;
+    videoCaptureContext.fill(new Path2D(backdropPathData));
+    videoCaptureContext.restore();
+  }
+
+  if (connectorPathData) {
+    videoCaptureContext.save();
+    videoCaptureContext.globalAlpha = tooltipOpacity;
+    videoCaptureContext.strokeStyle = connectorStyles.stroke || 'rgba(236, 238, 245, 0.84)';
+    videoCaptureContext.lineWidth = parseCssNumber(connectorStyles.strokeWidth, 1.2);
+    videoCaptureContext.lineCap = connectorStyles.strokeLinecap || 'round';
+    videoCaptureContext.lineJoin = connectorStyles.strokeLinejoin || 'round';
+    videoCaptureContext.stroke(new Path2D(connectorPathData));
+    videoCaptureContext.restore();
+  }
+
+  if (labelText) {
+    videoCaptureContext.save();
+    videoCaptureContext.globalAlpha = tooltipOpacity * labelOpacity;
+    videoCaptureContext.font = buildCanvasFontString(labelStyles);
+    videoCaptureContext.fillStyle = labelStyles.color || '#f2f3f5';
+    videoCaptureContext.textBaseline = 'top';
+    videoCaptureContext.shadowColor = 'rgba(0, 0, 0, 0.52)';
+    videoCaptureContext.shadowBlur = 8;
+    videoCaptureContext.shadowOffsetX = 0;
+    videoCaptureContext.shadowOffsetY = 1;
+    videoCaptureContext.fillText(
+      labelText,
+      parseCssNumber(labelStyles.left, 42),
+      parseCssNumber(labelStyles.top, 16),
+    );
+    videoCaptureContext.restore();
+  }
+
+  videoCaptureContext.restore();
+  return true;
+}
+
 function applyHiddenGraphStyle() {
   applyBaseGraphStyle({
     nodeOpacity: 0,
@@ -1958,11 +2092,41 @@ async function captureVideoFrame(options = {}) {
   if (!videoTimelineState.active) {
     throw new Error('No video script loaded. Call graphVideo.runScript(script) first.');
   }
-  return Renderer.captureScreenshot({
-    render: false,
-    mimeType: options.mimeType ?? 'image/png',
-    quality: options.quality,
-  });
+
+  const sourceCanvas = container?.querySelector('canvas');
+  if (!sourceCanvas) {
+    return Renderer.captureScreenshot({
+      render: false,
+      mimeType: options.mimeType ?? 'image/png',
+      quality: options.quality,
+    });
+  }
+
+  const targetCanvas = getVideoCaptureCanvas(sourceCanvas.width, sourceCanvas.height);
+  if (!videoCaptureContext) {
+    return Renderer.captureScreenshot({
+      render: false,
+      mimeType: options.mimeType ?? 'image/png',
+      quality: options.quality,
+    });
+  }
+  videoCaptureContext.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+  videoCaptureContext.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
+
+  const drewTooltip = drawTooltipIntoCapture(sourceCanvas, targetCanvas);
+  if (!drewTooltip) {
+    return Renderer.captureScreenshot({
+      render: false,
+      mimeType: options.mimeType ?? 'image/png',
+      quality: options.quality,
+    });
+  }
+
+  return encodeCanvasToDataUrl(
+    targetCanvas,
+    options.mimeType ?? 'image/png',
+    options.quality,
+  );
 }
 
 async function withInitializedGraph(initPromise, errorMessage, action) {
