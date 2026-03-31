@@ -73,6 +73,7 @@ const cameraStateTarget = new THREE.Vector3();
 const ARROW_RADIUS = 1.0;
 const ARROW_HEIGHT = 2.4;
 const ARROWS_PER_EDGE = 5;
+const SHOW_EDGE_ARROWS = false;
 const ARROW_T_START = 0.08;
 const ARROW_T_END = 0.92;
 const DEFAULT_EDGE_CURVE_SEGMENTS = 24;
@@ -80,11 +81,12 @@ const VIDEO_EDGE_CURVE_SEGMENTS = 4;
 const EDGE_CURVE_STRENGTH_BASE = 0.14;
 const EDGE_CURVE_STRENGTH_VARIANCE = 0.1;
 const EDGE_CURVE_MAX_BEND = 50;
-const EDGE_LINE_WIDTH = 1.2;
+const EDGE_LINE_WIDTH = 0.85;
 const DEFAULT_MAX_PIXEL_RATIO = 2.0;
 const ANIMATION_PIXEL_RATIO = 1.0;
 const DEFAULT_NODE_GEOMETRY_DETAIL = { widthSegments: 32, heightSegments: 24 };
 const VIDEO_NODE_GEOMETRY_DETAIL = { widthSegments: 6, heightSegments: 4 };
+const NODE_BASE_OPACITY = 1.0;
 const NODE_COLOR_TRANSITION_DURATION_MS = 320;
 const NODE_SCALE_TRANSITION_DURATION_MS = 320;
 const TRANSITION_COMPLETE_EPSILON = 1e-6;
@@ -402,10 +404,13 @@ export function initRenderer(containerEl) {
   controls.maxDistance = 5000;
   controls.enablePan = true;
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  dirLight.position.set(100, 200, 150);
-  scene.add(dirLight);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x101321, 0.95));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 0.78);
+  keyLight.position.set(180, 220, 160);
+  scene.add(keyLight);
+  const rimLight = new THREE.DirectionalLight(0xffffff, 0.34);
+  rimLight.position.set(-140, 90, -180);
+  scene.add(rimLight);
 
   window.addEventListener("resize", onResize);
 }
@@ -436,10 +441,13 @@ export function createNodes(nodeArray) {
   initializeNodeVisualState(nodes.length);
 
   const geometry = getNodeGeometryForCurrentMode();
-  const material = new THREE.MeshBasicMaterial({
+  const material = new THREE.MeshPhongMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 1.0,
+    opacity: NODE_BASE_OPACITY,
+    shininess: 6,
+    specular: new THREE.Color(0x22252d),
+    emissive: new THREE.Color(0x090b11),
   });
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = `
@@ -457,7 +465,7 @@ ${shader.fragmentShader}`.replace(
       "vec4 diffuseColor = vec4( diffuse, opacity * vInstanceOpacity );",
     );
   };
-  material.customProgramCacheKey = () => "node-instance-opacity-v1";
+  material.customProgramCacheKey = () => "node-instance-opacity-v2";
 
   instancedMesh = new THREE.InstancedMesh(geometry, material, nodes.length);
   instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -508,7 +516,7 @@ export function createEdges(edges, nodeArray) {
     color: 0x2c3138,
     linewidth: EDGE_LINE_WIDTH,
     transparent: true,
-    opacity: 0.32,
+    opacity: 0.18,
     depthWrite: false,
     resolution: new THREE.Vector2(
       container.clientWidth,
@@ -633,6 +641,11 @@ function buildEdgeArrows() {
     scene.remove(edgeArrows);
     edgeArrows.geometry.dispose();
     edgeArrows.material.dispose();
+  }
+
+  if (!SHOW_EDGE_ARROWS) {
+    edgeArrows = null;
+    return;
   }
 
   const coneGeo = makeArrowGeometry(ARROW_RADIUS, ARROW_HEIGHT);
@@ -970,6 +983,16 @@ function createHighlightLayer(
   lines.computeLineDistances();
   lines.renderOrder = 1;
   scene.add(lines);
+
+  if (!SHOW_EDGE_ARROWS) {
+    return {
+      edgeList: pairs,
+      positions,
+      lines,
+      arrows: null,
+      lineMaterial,
+    };
+  }
 
   // Highlight arrowheads (slightly larger)
   const hlRadius = ARROW_RADIUS * 1.4;

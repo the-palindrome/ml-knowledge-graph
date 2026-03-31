@@ -42,9 +42,9 @@ const primaryTooltipRef = {
 };
 const selectionAnchoredTooltipMap = new Map();
 const videoTooltipMap = new Map();
-const BASE_EDGE_OPACITY = 0.32;
-const SELECTED_CONTEXT_EDGE_OPACITY = 0.06;
-const SEARCH_EDGE_OPACITY = 0.09;
+const BASE_EDGE_OPACITY = 0.18;
+const SELECTED_CONTEXT_EDGE_OPACITY = 0.05;
+const SEARCH_EDGE_OPACITY = 0.08;
 const NON_FOCUS_NODE_OPACITY = 0.16;
 const SEARCH_NON_MATCH_OPACITY = 0.18;
 // Keep these highlight edge colors stable for selected path context.
