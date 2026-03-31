@@ -23,7 +23,7 @@ body {
 #canvas-container canvas { display: block; }
 
 /* Tooltip */
-#tooltip {
+.graph-tooltip {
   --tip-label-x: 42px;
   --tip-label-y: 16px;
   --tip-size-scale: 1;
@@ -53,12 +53,12 @@ body {
   isolation: isolate;
 }
 
-#tooltip.visible {
+.graph-tooltip.visible {
   opacity: 1;
   transform: translate3d(0, 0, 0) scale(1);
 }
 
-#tooltip-shape {
+.graph-tooltip-shape {
   position: absolute;
   inset: 0;
   overflow: visible;
@@ -72,13 +72,13 @@ body {
   z-index: -1;
 }
 
-#tooltip-backdrop-path {
+.graph-tooltip-backdrop-path {
   fill: rgba(3, 6, 12, 0.8);
   stroke: none;
   vector-effect: non-scaling-stroke;
 }
 
-#tooltip-connector-path {
+.graph-tooltip-connector-path {
   fill: none;
   stroke: rgba(236, 238, 245, 0.84);
   stroke-width: 1.2;
@@ -90,16 +90,16 @@ body {
   transition: stroke-dashoffset 280ms var(--motion-smooth);
 }
 
-#tooltip.visible #tooltip-shape {
+.graph-tooltip.visible .graph-tooltip-shape {
   opacity: 1;
   transform: scale(1);
 }
 
-#tooltip.visible #tooltip-connector-path {
+.graph-tooltip.visible .graph-tooltip-connector-path {
   stroke-dashoffset: 0;
 }
 
-.tooltip-label {
+.graph-tooltip .tooltip-label {
   display: inline-block;
   position: absolute;
   left: var(--tip-label-x);
@@ -114,7 +114,7 @@ body {
   z-index: 1;
 }
 
-#tooltip.visible .tooltip-label {
+.graph-tooltip.visible .tooltip-label {
   opacity: 1;
   transform: translateX(0);
   transition-delay: 70ms;
@@ -392,6 +392,22 @@ body {
 .settings-select option {
   background: #101420;
   color: #d8deed;
+}
+
+.settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #c7d0e5;
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-checkbox-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #d8deed;
 }
 
 /* Side panels */
@@ -1029,14 +1045,14 @@ body.video-render-mode #toast {
   display: none !important;
 }
 
-body.video-render-mode #tooltip,
-body.video-render-mode #tooltip-shape,
-body.video-render-mode .tooltip-label,
-body.video-render-mode #tooltip-connector-path {
+body.video-render-mode .graph-tooltip,
+body.video-render-mode .graph-tooltip-shape,
+body.video-render-mode .graph-tooltip .tooltip-label,
+body.video-render-mode .graph-tooltip-connector-path {
   transition: none !important;
 }
 
-body.video-render-mode #tooltip {
+body.video-render-mode .graph-tooltip {
   transform: translate3d(0, 0, 0) scale(1) !important;
 }
 

@@ -65,17 +65,18 @@
     <div id="canvas-container"></div>
 
     <!-- Tooltip -->
-    <div id="tooltip" aria-hidden="true">
+    <div id="tooltip" class="graph-tooltip" aria-hidden="true">
       <svg
         id="tooltip-shape"
+        class="graph-tooltip-shape"
         aria-hidden="true"
         focusable="false"
         preserveAspectRatio="none"
       >
-        <path id="tooltip-backdrop-path"></path>
-        <path id="tooltip-connector-path"></path>
+        <path id="tooltip-backdrop-path" class="graph-tooltip-backdrop-path"></path>
+        <path id="tooltip-connector-path" class="graph-tooltip-connector-path"></path>
       </svg>
-      <span class="tooltip-label" id="tooltip-label"></span>
+      <span class="tooltip-label graph-tooltip-label" id="tooltip-label"></span>
     </div>
 
     <!-- Top bar -->
@@ -235,6 +236,19 @@
               <option value="_prerequisite_ratio">Prerequisite ratio</option>
               <option value="_reachability_ratio">Reachability ratio</option>
             </select>
+          </section>
+          <section class="settings-section" aria-labelledby="tooltip-settings-title">
+            <h3 id="tooltip-settings-title">Tooltips</h3>
+            <label class="settings-label" for="explorer-tooltip-size-select">Tooltip size</label>
+            <select id="explorer-tooltip-size-select" class="settings-select">
+              <option value="small">Small</option>
+              <option value="medium" selected>Medium</option>
+              <option value="large">Large</option>
+            </select>
+            <label class="settings-checkbox-row" for="anchor-tooltip-on-selection">
+              <input id="anchor-tooltip-on-selection" type="checkbox" />
+              <span>Anchor tooltip on selection</span>
+            </label>
           </section>
         </div>
       </aside>

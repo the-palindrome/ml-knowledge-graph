@@ -19,6 +19,8 @@ let selectedNodeId = null;
 let selectedNodeIds = new Set();
 let hoveredNodeId = null;
 let isAnimating = false;
+let anchorTooltipOnSelection = false;
+let explorerTooltipSize = 'medium';
 let container = null;
 let videoCaptureCanvas = null;
 let videoCaptureContext = null;
@@ -28,6 +30,18 @@ const tooltipLabel = document.getElementById('tooltip-label');
 const tooltipShape = document.getElementById('tooltip-shape');
 const tooltipBackdropPath = document.getElementById('tooltip-backdrop-path');
 const tooltipConnectorPath = document.getElementById('tooltip-connector-path');
+const primaryTooltipRef = {
+  element: tooltip,
+  label: tooltipLabel,
+  shape: tooltipShape,
+  backdropPath: tooltipBackdropPath,
+  connectorPath: tooltipConnectorPath,
+  nodeId: null,
+  size: 'medium',
+  isPrimary: true,
+};
+const selectionAnchoredTooltipMap = new Map();
+const videoTooltipMap = new Map();
 const BASE_EDGE_OPACITY = 0.32;
 const SELECTED_CONTEXT_EDGE_OPACITY = 0.06;
 const SEARCH_EDGE_OPACITY = 0.09;
@@ -110,6 +124,7 @@ const VIDEO_SUPPORTED_ACTIONS = new Set([
   'openNodeTooltip',
   'closeTooltip',
   'closeNodeTooltip',
+  'closeAllTooltips',
   'fadeLabel',
   'orbit',
   'autoRotate',
@@ -134,6 +149,7 @@ const VIDEO_ACTIONS_REQUIRING_NODE_ID = new Set([
   'highlightDescendants',
   'highlightDependencies',
   'openTooltip',
+  'closeTooltip',
   'fadeLabel',
 ]);
 const VIDEO_CAMERA_TIMELINE_ACTIONS = new Set([
@@ -176,15 +192,15 @@ const videoTimelineState = {
   active: false,
   currentTime: 0,
   appliedSceneVersion: null,
-  tooltipLayoutNodeId: null,
-  tooltipLayoutSize: VIDEO_TOOLTIP_SIZE_MEDIUM,
 };
 let videoNodeLookupMap = null;
 
 window.addEventListener('resize', () => {
-  if (!hoveredNodeId) return;
-  updateHoverTooltipGeometry();
-  syncHoveredTooltipPosition();
+  syncActiveExplorerTooltips();
+  if (videoTimelineState.active) {
+    const seekState = buildVideoSeekState(videoTimelineState.currentTime);
+    syncVideoTooltips(seekState.tooltips);
+  }
 });
 
 // --- Bootstrap ---
@@ -202,7 +218,7 @@ async function init() {
 
   container = document.getElementById('canvas-container');
   Renderer.initRenderer(container);
-  Renderer.setPostRenderCallback(syncHoveredTooltipPosition);
+  Renderer.setPostRenderCallback(syncActiveExplorerTooltips);
   Renderer.createNodes(graph.nodes);
   Renderer.createEdges(graph.edges, graph.nodes);
 
@@ -229,6 +245,8 @@ async function init() {
   UI.setupSettingsPanel();
   UI.setupNodeColoring(handleNodeColoringModeChange);
   UI.setupNodeSizing(handleNodeSizingModeChange);
+  UI.setupExplorerTooltipSize(handleExplorerTooltipSizeChange);
+  UI.setupAnchorTooltipOnSelection(handleAnchorTooltipOnSelectionChange);
   UI.setupInfoPanels();
   UI.setupPathHighlightToggles(handlePathHighlightToggleChange);
   UI.setPathHighlightToggleState(pathHighlightState);
@@ -645,14 +663,118 @@ function handleNodeSizingModeChange(nextMode) {
   refreshCurrentVisualState();
 }
 
-// --- Hover ---
+function handleExplorerTooltipSizeChange(nextSize) {
+  if (!VIDEO_TOOLTIP_SIZE_OPTIONS.has(nextSize) || nextSize === explorerTooltipSize) return;
+  explorerTooltipSize = nextSize;
+  syncActiveExplorerTooltips();
+}
+
+// --- Hover / Tooltips ---
+
+function createTooltipInstance() {
+  if (!tooltip) return null;
+  const clone = tooltip.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.classList.remove('visible');
+  clone.setAttribute('aria-hidden', 'true');
+  clone.style.opacity = '';
+  for (const node of clone.querySelectorAll('[id]')) {
+    node.removeAttribute('id');
+  }
+  document.body.appendChild(clone);
+
+  return {
+    element: clone,
+    label: clone.querySelector('.graph-tooltip-label') ?? clone.querySelector('.tooltip-label'),
+    shape: clone.querySelector('.graph-tooltip-shape') ?? clone.querySelector('svg'),
+    backdropPath: clone.querySelector('.graph-tooltip-backdrop-path'),
+    connectorPath: clone.querySelector('.graph-tooltip-connector-path'),
+    nodeId: null,
+    size: VIDEO_TOOLTIP_SIZE_MEDIUM,
+    isPrimary: false,
+  };
+}
+
+function destroyTooltipInstance(tooltipRef) {
+  if (!tooltipRef || tooltipRef.isPrimary) return;
+  tooltipRef.element?.remove();
+}
+
+function clearTooltipMap(tooltipMap) {
+  for (const [, tooltipRef] of tooltipMap) {
+    destroyTooltipInstance(tooltipRef);
+  }
+  tooltipMap.clear();
+}
+
+function getOrCreateTooltip(tooltipMap, nodeId) {
+  let tooltipRef = tooltipMap.get(nodeId);
+  if (tooltipRef) return tooltipRef;
+  tooltipRef = createTooltipInstance();
+  if (!tooltipRef) return null;
+  tooltipMap.set(nodeId, tooltipRef);
+  return tooltipRef;
+}
+
+function hideTooltipRef(tooltipRef) {
+  if (!tooltipRef?.element) return;
+  tooltipRef.element.classList.remove('visible');
+  tooltipRef.element.setAttribute('aria-hidden', 'true');
+  tooltipRef.element.style.opacity = '';
+}
+
+function showTooltipRef(tooltipRef, opacity = 1) {
+  if (!tooltipRef?.element) return;
+  tooltipRef.element.classList.add('visible');
+  tooltipRef.element.setAttribute('aria-hidden', 'false');
+  const clampedOpacity = clamp01(opacity);
+  tooltipRef.element.style.opacity = clampedOpacity >= 0.999 ? '' : `${clampedOpacity}`;
+}
+
+function ensureTooltipLayout(tooltipRef, node, size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
+  if (!tooltipRef || !node || !tooltipRef.label) return;
+  if (
+    tooltipRef.nodeId === node.id
+    && tooltipRef.size === size
+    && tooltipRef.label.textContent === node.label
+  ) {
+    return;
+  }
+  tooltipRef.label.textContent = node.label;
+  const normalizedSize = updateHoverTooltipGeometry(tooltipRef, size);
+  tooltipRef.nodeId = node.id;
+  tooltipRef.size = normalizedSize;
+}
+
+function handleAnchorTooltipOnSelectionChange(enabled) {
+  anchorTooltipOnSelection = Boolean(enabled);
+  if (!anchorTooltipOnSelection) {
+    clearTooltipMap(selectionAnchoredTooltipMap);
+    if (hoveredNodeId) {
+      const hoverAnchor = getHoverTooltipAnchor(hoveredNodeId);
+      if (hoverAnchor && graph?.nodeMap.get(hoveredNodeId)) {
+        ensureTooltipLayout(primaryTooltipRef, graph.nodeMap.get(hoveredNodeId), explorerTooltipSize);
+        positionHoverTooltip(primaryTooltipRef, hoverAnchor.x, hoverAnchor.y);
+        showTooltipRef(primaryTooltipRef, 1);
+      }
+    }
+  }
+  syncSelectionAnchoredTooltips();
+}
 
 function handleHover(nodeId, screenX, screenY) {
   if (hoveredNodeId === nodeId) {
     if (nodeId) {
+      const suppressHoverTooltip = anchorTooltipOnSelection && selectedNodeIds.has(nodeId);
+      if (suppressHoverTooltip) {
+        hideTooltipRef(primaryTooltipRef);
+        return;
+      }
+
       const hoverAnchor = getHoverTooltipAnchor(nodeId, screenX, screenY);
       if (hoverAnchor) {
-        positionHoverTooltip(hoverAnchor.x, hoverAnchor.y);
+        positionHoverTooltip(primaryTooltipRef, hoverAnchor.x, hoverAnchor.y);
+        showTooltipRef(primaryTooltipRef, 1);
       }
     }
     return;
@@ -671,19 +793,20 @@ function handleHover(nodeId, screenX, screenY) {
 
   if (nodeId) {
     const node = graph.nodeMap.get(nodeId);
-    if (tooltipLabel) {
-      tooltipLabel.textContent = node.label;
-      updateHoverTooltipGeometry();
-    }
-    const hoverAnchor = getHoverTooltipAnchor(nodeId, screenX, screenY);
-    if (hoverAnchor) {
-      positionHoverTooltip(hoverAnchor.x, hoverAnchor.y);
-    }
-    tooltip.classList.add('visible');
-    tooltip.setAttribute('aria-hidden', 'false');
-    tooltip.style.opacity = '';
+    const suppressHoverTooltip = anchorTooltipOnSelection && selectedNodeIds.has(nodeId);
 
-    if (!hasActiveSelection()) {
+    if (!suppressHoverTooltip && node) {
+      ensureTooltipLayout(primaryTooltipRef, node, explorerTooltipSize);
+      const hoverAnchor = getHoverTooltipAnchor(nodeId, screenX, screenY);
+      if (hoverAnchor) {
+        positionHoverTooltip(primaryTooltipRef, hoverAnchor.x, hoverAnchor.y);
+      }
+      showTooltipRef(primaryTooltipRef, 1);
+    } else {
+      hideTooltipRef(primaryTooltipRef);
+    }
+
+    if (!hasActiveSelection() && node) {
       node._hoverRestoreScale = node._currentScale;
       node._currentScale = node._currentScale * 1.35;
       Renderer.updatePositions({ updateEdges: false, updateArrows: false });
@@ -691,7 +814,7 @@ function handleHover(nodeId, screenX, screenY) {
 
     container.style.cursor = 'pointer';
   } else {
-    hideTooltipImmediately();
+    hideTooltipRef(primaryTooltipRef);
     if (!hasActiveSelection()) {
       Renderer.updatePositions({ updateEdges: false, updateArrows: false });
     }
@@ -721,7 +844,12 @@ function getHoverTooltipAnchor(nodeId, fallbackX, fallbackY) {
 }
 
 function syncHoveredTooltipPosition() {
-  if (!hoveredNodeId || !tooltip || tooltip.getAttribute('aria-hidden') === 'true') {
+  if (!hoveredNodeId || !primaryTooltipRef.element || primaryTooltipRef.element.getAttribute('aria-hidden') === 'true') {
+    return;
+  }
+
+  if (anchorTooltipOnSelection && selectedNodeIds.has(hoveredNodeId)) {
+    hideTooltipRef(primaryTooltipRef);
     return;
   }
 
@@ -730,33 +858,73 @@ function syncHoveredTooltipPosition() {
     return;
   }
 
-  positionHoverTooltip(hoverAnchor.x, hoverAnchor.y);
+  positionHoverTooltip(primaryTooltipRef, hoverAnchor.x, hoverAnchor.y);
+}
+
+function syncSelectionAnchoredTooltips() {
+  const shouldAnchorSelection = anchorTooltipOnSelection && !videoTimelineState.active;
+  const desiredNodeIds = shouldAnchorSelection ? new Set(selectedNodeIds) : new Set();
+
+  for (const [nodeId, tooltipRef] of selectionAnchoredTooltipMap) {
+    if (!desiredNodeIds.has(nodeId)) {
+      destroyTooltipInstance(tooltipRef);
+      selectionAnchoredTooltipMap.delete(nodeId);
+    }
+  }
+
+  if (!shouldAnchorSelection || !graph) {
+    return;
+  }
+
+  for (const nodeId of desiredNodeIds) {
+    const node = graph.nodeMap.get(nodeId);
+    if (!node) continue;
+
+    const tooltipRef = getOrCreateTooltip(selectionAnchoredTooltipMap, nodeId);
+    if (!tooltipRef) continue;
+
+    ensureTooltipLayout(tooltipRef, node, explorerTooltipSize);
+    const anchor = getHoverTooltipAnchor(node.id);
+    if (!anchor) {
+      hideTooltipRef(tooltipRef);
+      continue;
+    }
+
+    positionHoverTooltip(tooltipRef, anchor.x, anchor.y);
+    showTooltipRef(tooltipRef, 1);
+  }
+}
+
+function syncActiveExplorerTooltips() {
+  if (videoTimelineState.active) return;
+  syncHoveredTooltipPosition();
+  syncSelectionAnchoredTooltips();
 }
 
 function getTooltipSizeScale(size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
   return VIDEO_TOOLTIP_SIZE_SCALE[size] ?? VIDEO_TOOLTIP_SIZE_SCALE[VIDEO_TOOLTIP_SIZE_MEDIUM];
 }
 
-function applyTooltipVisualSize(size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
-  if (!tooltip) return VIDEO_TOOLTIP_SIZE_MEDIUM;
+function applyTooltipVisualSize(tooltipRef, size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
+  if (!tooltipRef?.element) return VIDEO_TOOLTIP_SIZE_MEDIUM;
   const normalizedSize = VIDEO_TOOLTIP_SIZE_OPTIONS.has(size)
     ? size
     : VIDEO_TOOLTIP_SIZE_MEDIUM;
-  tooltip.style.setProperty('--tip-size-scale', `${getTooltipSizeScale(normalizedSize)}`);
+  tooltipRef.element.style.setProperty('--tip-size-scale', `${getTooltipSizeScale(normalizedSize)}`);
   return normalizedSize;
 }
 
-function updateTooltipConnectorPath(sourceX, sourceY) {
-  if (!tooltip || !tooltipConnectorPath) {
+function updateTooltipConnectorPath(tooltipRef, sourceX, sourceY) {
+  if (!tooltipRef?.element || !tooltipRef.connectorPath) {
     return;
   }
 
-  const labelX = Number(tooltip.dataset.tipLabelX);
-  const labelWidth = Number(tooltip.dataset.tipLabelWidth);
-  const baselineY = Number(tooltip.dataset.tipBaselineY);
-  const jointX = Number(tooltip.dataset.tipJointX);
-  const baseSourceX = Number(tooltip.dataset.tipBaseSourceX);
-  const baseSourceY = Number(tooltip.dataset.tipBaseSourceY);
+  const labelX = Number(tooltipRef.element.dataset.tipLabelX);
+  const labelWidth = Number(tooltipRef.element.dataset.tipLabelWidth);
+  const baselineY = Number(tooltipRef.element.dataset.tipBaselineY);
+  const jointX = Number(tooltipRef.element.dataset.tipJointX);
+  const baseSourceX = Number(tooltipRef.element.dataset.tipBaseSourceX);
+  const baseSourceY = Number(tooltipRef.element.dataset.tipBaseSourceY);
 
   if (!Number.isFinite(labelX) || !Number.isFinite(labelWidth) || !Number.isFinite(baselineY)) {
     return;
@@ -777,22 +945,22 @@ function updateTooltipConnectorPath(sourceX, sourceY) {
     `L ${labelX + labelWidth} ${baselineY}`,
   ].join(' ');
 
-  tooltipConnectorPath.setAttribute('d', connectorPath);
-  const connectorLength = tooltipConnectorPath.getTotalLength();
-  tooltipConnectorPath.style.setProperty('--path-len', `${connectorLength}`);
+  tooltipRef.connectorPath.setAttribute('d', connectorPath);
+  const connectorLength = tooltipRef.connectorPath.getTotalLength();
+  tooltipRef.connectorPath.style.setProperty('--path-len', `${connectorLength}`);
 }
 
-function updateHoverTooltipGeometry(size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
-  if (!tooltip || !tooltipLabel || !tooltipShape || !tooltipBackdropPath || !tooltipConnectorPath) {
-    return;
+function updateHoverTooltipGeometry(tooltipRef, size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
+  if (!tooltipRef?.element || !tooltipRef.label || !tooltipRef.shape || !tooltipRef.backdropPath || !tooltipRef.connectorPath) {
+    return VIDEO_TOOLTIP_SIZE_MEDIUM;
   }
 
-  const normalizedSize = applyTooltipVisualSize(size);
+  const normalizedSize = applyTooltipVisualSize(tooltipRef, size);
   const sizeScale = getTooltipSizeScale(normalizedSize);
   const labelX = Math.round(42 * sizeScale);
   const labelY = Math.round(16 * sizeScale);
-  const labelWidth = Math.max(1, Math.ceil(tooltipLabel.offsetWidth));
-  const labelHeight = Math.max(1, Math.ceil(tooltipLabel.offsetHeight));
+  const labelWidth = Math.max(1, Math.ceil(tooltipRef.label.offsetWidth));
+  const labelHeight = Math.max(1, Math.ceil(tooltipRef.label.offsetHeight));
   const baselineY = labelY + labelHeight + 2;
   const sourceX = Math.round(TOOLTIP_CONNECTOR_SOURCE_X * sizeScale);
   const sourceY = Math.max(Math.round(7 * sizeScale), baselineY - Math.round(34 * sizeScale));
@@ -805,22 +973,22 @@ function updateHoverTooltipGeometry(size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
     ),
   );
 
-  tooltip.style.setProperty('--tip-label-x', `${labelX}px`);
-  tooltip.style.setProperty('--tip-label-y', `${labelY}px`);
-  tooltip.style.width = `${width}px`;
-  tooltip.style.height = `${height}px`;
+  tooltipRef.element.style.setProperty('--tip-label-x', `${labelX}px`);
+  tooltipRef.element.style.setProperty('--tip-label-y', `${labelY}px`);
+  tooltipRef.element.style.width = `${width}px`;
+  tooltipRef.element.style.height = `${height}px`;
 
-  tooltipShape.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  tooltipShape.setAttribute('width', `${width}`);
-  tooltipShape.setAttribute('height', `${height}`);
+  tooltipRef.shape.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  tooltipRef.shape.setAttribute('width', `${width}`);
+  tooltipRef.shape.setAttribute('height', `${height}`);
 
-  tooltip.dataset.tipLabelX = `${labelX}`;
-  tooltip.dataset.tipLabelWidth = `${labelWidth}`;
-  tooltip.dataset.tipBaselineY = `${baselineY}`;
-  tooltip.dataset.tipJointX = `${jointX}`;
-  tooltip.dataset.tipBaseSourceX = `${sourceX}`;
-  tooltip.dataset.tipBaseSourceY = `${sourceY}`;
-  updateTooltipConnectorPath(sourceX, sourceY);
+  tooltipRef.element.dataset.tipLabelX = `${labelX}`;
+  tooltipRef.element.dataset.tipLabelWidth = `${labelWidth}`;
+  tooltipRef.element.dataset.tipBaselineY = `${baselineY}`;
+  tooltipRef.element.dataset.tipJointX = `${jointX}`;
+  tooltipRef.element.dataset.tipBaseSourceX = `${sourceX}`;
+  tooltipRef.element.dataset.tipBaseSourceY = `${sourceY}`;
+  updateTooltipConnectorPath(tooltipRef, sourceX, sourceY);
 
   const inset = 1.5;
   const backdropPath = [
@@ -830,20 +998,22 @@ function updateHoverTooltipGeometry(size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
     `L ${inset} ${height - inset}`,
     'Z',
   ].join(' ');
-  tooltipBackdropPath.setAttribute('d', backdropPath);
+  tooltipRef.backdropPath.setAttribute('d', backdropPath);
+
+  return normalizedSize;
 }
 
-function positionHoverTooltip(screenX, screenY) {
-  if (!tooltip) {
+function positionHoverTooltip(tooltipRef, screenX, screenY) {
+  if (!tooltipRef?.element) {
     return;
   }
 
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  const tooltipWidth = Math.max(tooltip.offsetWidth, TOOLTIP_MIN_WIDTH);
-  const tooltipHeight = Math.max(tooltip.offsetHeight, 46);
-  const baseSourceX = Number(tooltip.dataset.tipBaseSourceX);
-  const baseSourceY = Number(tooltip.dataset.tipBaseSourceY);
+  const tooltipWidth = Math.max(tooltipRef.element.offsetWidth, TOOLTIP_MIN_WIDTH);
+  const tooltipHeight = Math.max(tooltipRef.element.offsetHeight, 46);
+  const baseSourceX = Number(tooltipRef.element.dataset.tipBaseSourceX);
+  const baseSourceY = Number(tooltipRef.element.dataset.tipBaseSourceY);
   const sourceX = Number.isFinite(baseSourceX) ? baseSourceX : TOOLTIP_CONNECTOR_SOURCE_X;
   const sourceY = Number.isFinite(baseSourceY) ? baseSourceY : 7;
 
@@ -858,9 +1028,9 @@ function positionHoverTooltip(screenX, screenY) {
   const sourceOffsetX = preferredLeft - left;
   const sourceOffsetY = preferredTop - top;
 
-  tooltip.style.left = `${left}px`;
-  tooltip.style.top = `${top}px`;
-  updateTooltipConnectorPath(sourceX + sourceOffsetX, sourceY + sourceOffsetY);
+  tooltipRef.element.style.left = `${left}px`;
+  tooltipRef.element.style.top = `${top}px`;
+  updateTooltipConnectorPath(tooltipRef, sourceX + sourceOffsetX, sourceY + sourceOffsetY);
 }
 
 // --- Click: selection + path highlighting ---
@@ -926,6 +1096,7 @@ function handleEmptyClick() {
   hoveredNodeId = null;
   UI.updatePermalink(null);
   hideTooltipImmediately();
+  syncSelectionAnchoredTooltips();
   resetView();
   UI.hideInfoPanel();
   UI.setPathHighlightToggleEnabled(false);
@@ -943,6 +1114,7 @@ function handleSearch(query) {
   if (!query) {
     selectedNodeId = null;
     selectedNodeIds = new Set();
+    syncSelectionAnchoredTooltips();
     UI.hideInfoPanel();
     UI.setPathHighlightToggleEnabled(false);
     UI.enableRadialLayout(false);
@@ -952,6 +1124,7 @@ function handleSearch(query) {
 
   selectedNodeId = null;
   selectedNodeIds = new Set();
+  syncSelectionAnchoredTooltips();
   UI.hideInfoPanel();
   UI.setPathHighlightToggleEnabled(false);
   applySearchState(query, true);
@@ -1108,6 +1281,8 @@ function applySelectionHighlight(selectionContext, options = {}) {
     const node = graph.nodeMap.get(cameraNodeId);
     if (node) Renderer.animateCamera(node.x, node.y, node.z);
   }
+
+  syncSelectionAnchoredTooltips();
 }
 
 // --- Layout change ---
@@ -1638,6 +1813,10 @@ function normalizeVideoAction(rawAction, index) {
     normalized.opacity = 0;
   }
 
+  if (actionName === 'closeAllTooltips') {
+    normalized.opacity = 0;
+  }
+
   if (actionName === 'highlightDescendants' || actionName === 'highlightDependencies') {
     if (!('level' in rawAction)) {
       throw new Error(`Action "${declaredActionName}" at index ${index} requires a level.`);
@@ -1688,9 +1867,7 @@ function createInitialVideoSeekState() {
     showPrerequisites: true,
     showDependents: false,
     contextOverride: null,
-    tooltipNodeId: null,
-    tooltipOpacity: 1,
-    tooltipSize: VIDEO_TOOLTIP_SIZE_MEDIUM,
+    tooltips: new Map(),
     cameraState: cloneCameraState(videoTimelineState.baseCameraState ?? fallbackCameraState),
     sceneVersion: 0,
   };
@@ -1838,15 +2015,49 @@ function applyVideoZoomCamera(state, action, progress) {
   };
 }
 
-function applyVideoTooltipFade(state, action, progress) {
-  if (action.nodeId) {
-    state.tooltipNodeId = action.nodeId;
+function applyVideoTooltipFadeForNode(state, action, progress) {
+  if (!action.nodeId) return;
+
+  const existing = state.tooltips.get(action.nodeId) ?? {
+    opacity: 0,
+    size: VIDEO_TOOLTIP_SIZE_MEDIUM,
+  };
+  if (action.action === 'openTooltip') {
+    existing.size = action.size ?? existing.size ?? VIDEO_TOOLTIP_SIZE_MEDIUM;
   }
-  const startOpacity = clamp01(state.tooltipOpacity);
+
+  const startOpacity = clamp01(existing.opacity);
   const endOpacity = clamp01(action.opacity ?? 1);
-  state.tooltipOpacity = lerpScalar(startOpacity, endOpacity, progress);
+  const nextOpacity = lerpScalar(startOpacity, endOpacity, progress);
+
   if (progress >= 1 && endOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
-    state.tooltipNodeId = null;
+    state.tooltips.delete(action.nodeId);
+    return;
+  }
+
+  state.tooltips.set(action.nodeId, {
+    ...existing,
+    opacity: nextOpacity,
+  });
+}
+
+function applyVideoCloseAllTooltips(state, progress) {
+  if (state.tooltips.size === 0) return;
+
+  for (const [nodeId, tooltipState] of [...state.tooltips.entries()]) {
+    const startOpacity = clamp01(tooltipState.opacity);
+    const endOpacity = 0;
+    const nextOpacity = lerpScalar(startOpacity, endOpacity, progress);
+
+    if (progress >= 1 || nextOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
+      state.tooltips.delete(nodeId);
+      continue;
+    }
+
+    state.tooltips.set(nodeId, {
+      ...tooltipState,
+      opacity: nextOpacity,
+    });
   }
 }
 
@@ -1911,26 +2122,21 @@ function applyVideoActionAtTime(state, action, timelineTime) {
       state.visibilityMode = VIDEO_GRAPH_VISIBILITY.REVEALED;
       break;
     case 'openTooltip':
-      state.tooltipSize = action.size ?? VIDEO_TOOLTIP_SIZE_MEDIUM;
-      applyVideoTooltipFade(
+    case 'closeTooltip':
+    case 'fadeLabel':
+      applyVideoTooltipFadeForNode(
         state,
         {
           ...action,
-          opacity: action.opacity ?? 1,
+          opacity: action.action === 'closeTooltip'
+            ? 0
+            : (action.opacity ?? 1),
         },
         progress,
       );
       break;
-    case 'closeTooltip':
-    case 'fadeLabel':
-      applyVideoTooltipFade(
-        state,
-        {
-          ...action,
-          opacity: action.action === 'closeTooltip' ? 0 : (action.opacity ?? 1),
-        },
-        progress,
-      );
+    case 'closeAllTooltips':
+      applyVideoCloseAllTooltips(state, progress);
       break;
     case 'orbit':
     case 'autoRotate':
@@ -1954,9 +2160,7 @@ function buildVideoSeekState(timelineTime) {
 }
 
 function hideTooltipImmediately() {
-  tooltip.classList.remove('visible');
-  tooltip.setAttribute('aria-hidden', 'true');
-  tooltip.style.opacity = '';
+  hideTooltipRef(primaryTooltipRef);
 }
 
 function getVideoCaptureCanvas(width, height) {
@@ -2011,22 +2215,36 @@ function buildCanvasFontString(style) {
   return fontParts.join(' ');
 }
 
-function drawTooltipIntoCapture(sourceCanvas, targetCanvas) {
-  if (!tooltip || !tooltipLabel || !tooltipBackdropPath || !tooltipConnectorPath || !videoCaptureContext) {
+function getRenderableTooltipRefs() {
+  return [
+    primaryTooltipRef,
+    ...selectionAnchoredTooltipMap.values(),
+    ...videoTooltipMap.values(),
+  ].filter((tooltipRef) => Boolean(tooltipRef?.element));
+}
+
+function drawSingleTooltipIntoCapture(tooltipRef, sourceCanvas, targetCanvas) {
+  if (
+    !tooltipRef?.element
+    || !tooltipRef.label
+    || !tooltipRef.backdropPath
+    || !tooltipRef.connectorPath
+    || !videoCaptureContext
+  ) {
     return false;
   }
-  if (tooltip.getAttribute('aria-hidden') === 'true') {
+  if (tooltipRef.element.getAttribute('aria-hidden') === 'true') {
     return false;
   }
 
-  const tooltipStyles = getComputedStyle(tooltip);
+  const tooltipStyles = getComputedStyle(tooltipRef.element);
   const tooltipOpacity = clamp01(parseCssNumber(tooltipStyles.opacity, 1));
   if (tooltipOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
     return false;
   }
 
   const sourceRect = sourceCanvas.getBoundingClientRect();
-  const tooltipRect = tooltip.getBoundingClientRect();
+  const tooltipRect = tooltipRef.element.getBoundingClientRect();
   if (tooltipRect.width <= 0 || tooltipRect.height <= 0 || sourceRect.width <= 0 || sourceRect.height <= 0) {
     return false;
   }
@@ -2036,13 +2254,13 @@ function drawTooltipIntoCapture(sourceCanvas, targetCanvas) {
   const offsetX = tooltipRect.left - sourceRect.left;
   const offsetY = tooltipRect.top - sourceRect.top;
 
-  const backdropPathData = tooltipBackdropPath.getAttribute('d');
-  const connectorPathData = tooltipConnectorPath.getAttribute('d');
-  const backdropStyles = getComputedStyle(tooltipBackdropPath);
-  const connectorStyles = getComputedStyle(tooltipConnectorPath);
-  const labelStyles = getComputedStyle(tooltipLabel);
+  const backdropPathData = tooltipRef.backdropPath.getAttribute('d');
+  const connectorPathData = tooltipRef.connectorPath.getAttribute('d');
+  const backdropStyles = getComputedStyle(tooltipRef.backdropPath);
+  const connectorStyles = getComputedStyle(tooltipRef.connectorPath);
+  const labelStyles = getComputedStyle(tooltipRef.label);
   const labelOpacity = clamp01(parseCssNumber(labelStyles.opacity, 1));
-  const labelText = tooltipLabel.textContent ?? '';
+  const labelText = tooltipRef.label.textContent ?? '';
 
   videoCaptureContext.save();
   videoCaptureContext.scale(scaleX, scaleY);
@@ -2091,6 +2309,14 @@ function drawTooltipIntoCapture(sourceCanvas, targetCanvas) {
   return true;
 }
 
+function drawTooltipIntoCapture(sourceCanvas, targetCanvas) {
+  let drewTooltip = false;
+  for (const tooltipRef of getRenderableTooltipRefs()) {
+    drewTooltip = drawSingleTooltipIntoCapture(tooltipRef, sourceCanvas, targetCanvas) || drewTooltip;
+  }
+  return drewTooltip;
+}
+
 function applyHiddenGraphStyle() {
   applyBaseGraphStyle({
     nodeOpacity: 0,
@@ -2100,39 +2326,58 @@ function applyHiddenGraphStyle() {
   });
 }
 
-function applyVideoTooltipState(nodeId, opacity = 1, size = VIDEO_TOOLTIP_SIZE_MEDIUM) {
-  if (!tooltip || !tooltipLabel || !graph) return;
-  const clampedOpacity = clamp01(opacity);
-  const node = nodeId ? graph.nodeMap.get(nodeId) : null;
-  const normalizedSize = applyTooltipVisualSize(size);
+function serializeVideoTooltips(tooltipMap) {
+  return [...tooltipMap.entries()]
+    .map(([nodeId, tooltipState]) => ({
+      nodeId,
+      opacity: clamp01(tooltipState?.opacity ?? 0),
+      size: VIDEO_TOOLTIP_SIZE_OPTIONS.has(tooltipState?.size)
+        ? tooltipState.size
+        : VIDEO_TOOLTIP_SIZE_MEDIUM,
+    }))
+    .sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+}
 
-  if (!node || clampedOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
-    videoTimelineState.tooltipLayoutNodeId = null;
-    hideTooltipImmediately();
-    return;
+function syncVideoTooltips(tooltipMap = new Map()) {
+  if (!graph) return;
+  const desiredNodeIds = new Set(tooltipMap.keys());
+
+  for (const [nodeId, tooltipRef] of videoTooltipMap) {
+    if (!desiredNodeIds.has(nodeId)) {
+      destroyTooltipInstance(tooltipRef);
+      videoTooltipMap.delete(nodeId);
+    }
   }
 
-  const screenPos = Renderer.projectToScreen(node.id);
-  if (!screenPos || screenPos.behind) {
-    tooltip.classList.remove('visible');
-    tooltip.setAttribute('aria-hidden', 'true');
-    tooltip.style.opacity = `${clampedOpacity}`;
-    return;
-  }
+  for (const [nodeId, tooltipState] of tooltipMap) {
+    const node = graph.nodeMap.get(nodeId);
+    const clampedOpacity = clamp01(tooltipState?.opacity ?? 0);
+    if (!node || clampedOpacity <= VIDEO_TOOLTIP_HIDDEN_OPACITY) {
+      const tooltipRef = videoTooltipMap.get(nodeId);
+      if (tooltipRef) {
+        destroyTooltipInstance(tooltipRef);
+        videoTooltipMap.delete(nodeId);
+      }
+      continue;
+    }
 
-  if (
-    videoTimelineState.tooltipLayoutNodeId !== node.id
-    || videoTimelineState.tooltipLayoutSize !== normalizedSize
-  ) {
-    tooltipLabel.textContent = node.label;
-    updateHoverTooltipGeometry(normalizedSize);
-    videoTimelineState.tooltipLayoutNodeId = node.id;
-    videoTimelineState.tooltipLayoutSize = normalizedSize;
+    const tooltipRef = getOrCreateTooltip(videoTooltipMap, nodeId);
+    if (!tooltipRef) continue;
+
+    const size = VIDEO_TOOLTIP_SIZE_OPTIONS.has(tooltipState?.size)
+      ? tooltipState.size
+      : VIDEO_TOOLTIP_SIZE_MEDIUM;
+    ensureTooltipLayout(tooltipRef, node, size);
+
+    const screenPos = Renderer.projectToScreen(node.id);
+    if (!screenPos || screenPos.behind) {
+      hideTooltipRef(tooltipRef);
+      continue;
+    }
+
+    positionHoverTooltip(tooltipRef, screenPos.x, screenPos.y);
+    showTooltipRef(tooltipRef, clampedOpacity);
   }
-  positionHoverTooltip(screenPos.x, screenPos.y);
-  tooltip.classList.add('visible');
-  tooltip.setAttribute('aria-hidden', 'false');
-  tooltip.style.opacity = `${clampedOpacity}`;
 }
 
 function applyVideoSeekStateToScene(state, timelineTime) {
@@ -2173,7 +2418,7 @@ function applyVideoSeekStateToScene(state, timelineTime) {
   if (state.cameraState) {
     Renderer.setCameraState(state.cameraState);
   }
-  applyVideoTooltipState(state.tooltipNodeId, state.tooltipOpacity, state.tooltipSize);
+  syncVideoTooltips(state.tooltips);
   Renderer.renderFrame({ updateControls: false });
   videoTimelineState.currentTime = timelineTime;
 
@@ -2183,9 +2428,7 @@ function applyVideoSeekStateToScene(state, timelineTime) {
     selectedNodeIds: [...selectedNodeIds],
     visibilityMode: state.visibilityMode,
     sceneVersion: state.sceneVersion,
-    tooltipNodeId: state.tooltipNodeId,
-    tooltipOpacity: state.tooltipOpacity,
-    tooltipSize: state.tooltipSize,
+    tooltips: serializeVideoTooltips(state.tooltips),
     cameraState: state.cameraState
       ? {
         position: { ...state.cameraState.position },
@@ -2200,9 +2443,9 @@ function enableVideoRenderMode() {
   Renderer.setAutoRotate(false);
   Renderer.setDeterministicMode(true);
   Renderer.setRenderLoopPaused(true);
-  videoTimelineState.tooltipLayoutNodeId = null;
-  videoTimelineState.tooltipLayoutSize = VIDEO_TOOLTIP_SIZE_MEDIUM;
-  applyTooltipVisualSize(VIDEO_TOOLTIP_SIZE_MEDIUM);
+  clearTooltipMap(selectionAnchoredTooltipMap);
+  clearTooltipMap(videoTooltipMap);
+  applyTooltipVisualSize(primaryTooltipRef, VIDEO_TOOLTIP_SIZE_MEDIUM);
   hideTooltipImmediately();
 }
 
@@ -2216,8 +2459,6 @@ async function runVideoScript(scriptInput) {
   videoTimelineState.active = true;
   videoTimelineState.currentTime = 0;
   videoTimelineState.appliedSceneVersion = null;
-  videoTimelineState.tooltipLayoutNodeId = null;
-  videoTimelineState.tooltipLayoutSize = VIDEO_TOOLTIP_SIZE_MEDIUM;
 
   enableVideoRenderMode();
   const initialFrameState = await seekVideoTimeline(0);

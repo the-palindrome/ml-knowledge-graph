@@ -241,9 +241,7 @@ function getFrameStateSignature(frameState) {
     sceneVersion: frameState.sceneVersion ?? null,
     visibilityMode: frameState.visibilityMode ?? null,
     selectedNodeIds: frameState.selectedNodeIds ?? [],
-    tooltipNodeId: frameState.tooltipNodeId ?? null,
-    tooltipOpacity: frameState.tooltipOpacity ?? null,
-    tooltipSize: frameState.tooltipSize ?? null,
+    tooltips: frameState.tooltips ?? [],
     cameraState: frameState.cameraState ?? null,
   });
 }
