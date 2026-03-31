@@ -354,6 +354,55 @@ Optional:
 - selection options from `selectNode` (e.g., `append`, `appendToSelection`)
 - `at`, `duration`
 
+### `highlightDepthGroupNodes`
+Highlights all nodes at a specific graph depth level.
+
+Required:
+
+- `level` (non-negative integer): exact node depth to highlight
+
+Optional:
+
+- `at`, `duration`
+
+### `highlightDepthEdges`
+Highlights all edges whose endpoints are between two depth levels (inclusive range).
+
+Required:
+
+- `from` (non-negative integer): range start depth
+- `to` (non-negative integer): range end depth
+
+Notes:
+
+- `from`/`to` order is normalized automatically; `from > to` is allowed.
+
+Optional:
+
+- `at`, `duration`
+
+### `highlightLowerSlice`
+Highlights all nodes and edges at depth levels less than or equal to `to`.
+
+Required:
+
+- `to` (non-negative integer): upper depth boundary for the lower slice
+
+Optional:
+
+- `at`, `duration`
+
+### `highlightUpperSlice`
+Highlights all nodes and edges at depth levels greater than or equal to `from`.
+
+Required:
+
+- `from` (non-negative integer): lower depth boundary for the upper slice
+
+Optional:
+
+- `at`, `duration`
+
 ## 7.5 Tooltip / Label Actions
 
 ### `openTooltip`
@@ -423,6 +472,10 @@ Canonical actions:
 - `highlightNeighbors`
 - `highlightDescendants`
 - `highlightDependencies`
+- `highlightDepthGroupNodes`
+- `highlightDepthEdges`
+- `highlightLowerSlice`
+- `highlightUpperSlice`
 - `hideGraph`
 - `fadeGraph`
 - `revealGraph`
@@ -511,6 +564,7 @@ Common script validation failures:
 - unknown node reference
 - invalid vec3 format or non-finite coordinates
 - invalid `level` (must be a non-negative integer)
+- invalid `from` / `to` depth parameters (must be non-negative integers)
 - camera action with `duration <= 0`
 - invalid `axis`
 - missing required arguments for action

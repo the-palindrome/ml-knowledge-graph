@@ -117,6 +117,10 @@ const VIDEO_SUPPORTED_ACTIONS = new Set([
   'highlightNeighbors',
   'highlightDescendants',
   'highlightDependencies',
+  'highlightDepthGroupNodes',
+  'highlightDepthEdges',
+  'highlightLowerSlice',
+  'highlightUpperSlice',
   'hideGraph',
   'fadeGraph',
   'revealGraph',
@@ -167,6 +171,10 @@ const VIDEO_SCENE_STATE_ACTIONS = new Set([
   'highlightNeighbors',
   'highlightDescendants',
   'highlightDependencies',
+  'highlightDepthGroupNodes',
+  'highlightDepthEdges',
+  'highlightLowerSlice',
+  'highlightUpperSlice',
   'hideGraph',
   'fadeGraph',
   'revealGraph',
@@ -551,6 +559,58 @@ function buildVideoDirectionalSelectionContext(selectedIds, rootNodeId, relation
   }
 
   return { selectedNodeSet, prerequisiteSet, dependentSet };
+}
+
+function getNodesAtDepthLevel(level) {
+  const nodeSet = new Set();
+  if (!graph) return nodeSet;
+
+  for (const node of graph.nodes) {
+    if (node.depth === level) {
+      nodeSet.add(node.id);
+    }
+  }
+
+  return nodeSet;
+}
+
+function getNodesWithinDepthRange(fromDepth, toDepth) {
+  const nodeSet = new Set();
+  if (!graph) return nodeSet;
+
+  const minDepth = Math.min(fromDepth, toDepth);
+  const maxDepth = Math.max(fromDepth, toDepth);
+  for (const node of graph.nodes) {
+    if (node.depth >= minDepth && node.depth <= maxDepth) {
+      nodeSet.add(node.id);
+    }
+  }
+
+  return nodeSet;
+}
+
+function getGraphDepthBounds() {
+  if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
+    return { minDepth: 0, maxDepth: 0 };
+  }
+
+  let minDepth = Number.POSITIVE_INFINITY;
+  let maxDepth = Number.NEGATIVE_INFINITY;
+  for (const node of graph.nodes) {
+    const depth = Number(node.depth);
+    if (!Number.isFinite(depth)) continue;
+    if (depth < minDepth) minDepth = depth;
+    if (depth > maxDepth) maxDepth = depth;
+  }
+
+  if (!Number.isFinite(minDepth) || !Number.isFinite(maxDepth)) {
+    return { minDepth: 0, maxDepth: 0 };
+  }
+
+  return {
+    minDepth: Math.floor(minDepth),
+    maxDepth: Math.floor(maxDepth),
+  };
 }
 
 function getSortedNodesByIds(nodeIdSet) {
@@ -1502,11 +1562,11 @@ function parseVideoVec3(value, fieldName, actionName, index) {
   return normalized;
 }
 
-function parseVideoLevel(value, actionName, index) {
+function parseVideoLevel(value, actionName, index, fieldName = 'level') {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(
-      `Action "${actionName}" at index ${index} has invalid level; expected a non-negative integer.`,
+      `Action "${actionName}" at index ${index} has invalid ${fieldName}; expected a non-negative integer.`,
     );
   }
   return parsed;
@@ -1845,6 +1905,40 @@ function normalizeVideoAction(rawAction, index) {
     normalized.level = parseVideoLevel(rawAction.level, declaredActionName, index);
   }
 
+  if (actionName === 'highlightDepthGroupNodes') {
+    if (!('level' in rawAction)) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires a level.`);
+    }
+    normalized.level = parseVideoLevel(rawAction.level, declaredActionName, index);
+  }
+
+  if (actionName === 'highlightDepthEdges') {
+    if (!('from' in rawAction)) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires "from".`);
+    }
+    if (!('to' in rawAction)) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires "to".`);
+    }
+    normalized.from = parseVideoLevel(rawAction.from, declaredActionName, index, 'from');
+    normalized.to = parseVideoLevel(rawAction.to, declaredActionName, index, 'to');
+    normalized._depthFrom = Math.min(normalized.from, normalized.to);
+    normalized._depthTo = Math.max(normalized.from, normalized.to);
+  }
+
+  if (actionName === 'highlightLowerSlice') {
+    if (!('to' in rawAction)) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires "to".`);
+    }
+    normalized.to = parseVideoLevel(rawAction.to, declaredActionName, index, 'to');
+  }
+
+  if (actionName === 'highlightUpperSlice') {
+    if (!('from' in rawAction)) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires "from".`);
+    }
+    normalized.from = parseVideoLevel(rawAction.from, declaredActionName, index, 'from');
+  }
+
   return normalized;
 }
 
@@ -1932,6 +2026,95 @@ function applyVideoDirectionalHighlightState(state, action, relationKey) {
     relationKey,
     action.level,
   );
+}
+
+function applyVideoDepthGroupHighlightState(state, action) {
+  const depthNodeSet = getNodesAtDepthLevel(action.level);
+  state.selectedNodeIds = depthNodeSet;
+  state.focusNodeId = getFirstSetValue(depthNodeSet);
+  state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+  state.showPrerequisites = false;
+  state.showDependents = false;
+  state.contextOverride = {
+    selectedNodeSet: depthNodeSet,
+    prerequisiteSet: new Set(),
+    dependentSet: new Set(),
+  };
+}
+
+function applyVideoDepthEdgesHighlightState(state, action) {
+  const fromDepthNodes = getNodesAtDepthLevel(action._depthFrom);
+  const toDepthNodes = getNodesAtDepthLevel(action._depthTo);
+  const highlightedRangeNodes = getNodesWithinDepthRange(action._depthFrom, action._depthTo);
+
+  const selectedNodeSet = new Set([
+    ...fromDepthNodes,
+    ...toDepthNodes,
+  ]);
+  if (selectedNodeSet.size === 0) {
+    for (const nodeId of highlightedRangeNodes) {
+      selectedNodeSet.add(nodeId);
+    }
+  }
+
+  state.selectedNodeIds = selectedNodeSet;
+  state.focusNodeId = getFirstSetValue(selectedNodeSet);
+  state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+  state.showPrerequisites = true;
+  state.showDependents = false;
+  state.contextOverride = {
+    selectedNodeSet,
+    prerequisiteSet: highlightedRangeNodes,
+    dependentSet: new Set(),
+  };
+}
+
+function applyVideoLowerSliceHighlightState(state, action) {
+  const { minDepth } = getGraphDepthBounds();
+  const boundaryNodes = getNodesAtDepthLevel(action.to);
+  const highlightedRangeNodes = getNodesWithinDepthRange(minDepth, action.to);
+
+  const selectedNodeSet = new Set(boundaryNodes);
+  if (selectedNodeSet.size === 0) {
+    for (const nodeId of highlightedRangeNodes) {
+      selectedNodeSet.add(nodeId);
+    }
+  }
+
+  state.selectedNodeIds = selectedNodeSet;
+  state.focusNodeId = getFirstSetValue(selectedNodeSet);
+  state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+  state.showPrerequisites = true;
+  state.showDependents = false;
+  state.contextOverride = {
+    selectedNodeSet,
+    prerequisiteSet: highlightedRangeNodes,
+    dependentSet: new Set(),
+  };
+}
+
+function applyVideoUpperSliceHighlightState(state, action) {
+  const { maxDepth } = getGraphDepthBounds();
+  const boundaryNodes = getNodesAtDepthLevel(action.from);
+  const highlightedRangeNodes = getNodesWithinDepthRange(action.from, maxDepth);
+
+  const selectedNodeSet = new Set(boundaryNodes);
+  if (selectedNodeSet.size === 0) {
+    for (const nodeId of highlightedRangeNodes) {
+      selectedNodeSet.add(nodeId);
+    }
+  }
+
+  state.selectedNodeIds = selectedNodeSet;
+  state.focusNodeId = getFirstSetValue(selectedNodeSet);
+  state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+  state.showPrerequisites = false;
+  state.showDependents = true;
+  state.contextOverride = {
+    selectedNodeSet,
+    prerequisiteSet: new Set(),
+    dependentSet: highlightedRangeNodes,
+  };
 }
 
 function getVideoNodePosition(nodeId) {
@@ -2132,6 +2315,18 @@ function applyVideoActionAtTime(state, action, timelineTime) {
       break;
     case 'highlightDependencies':
       applyVideoDirectionalHighlightState(state, action, 'from');
+      break;
+    case 'highlightDepthGroupNodes':
+      applyVideoDepthGroupHighlightState(state, action);
+      break;
+    case 'highlightDepthEdges':
+      applyVideoDepthEdgesHighlightState(state, action);
+      break;
+    case 'highlightLowerSlice':
+      applyVideoLowerSliceHighlightState(state, action);
+      break;
+    case 'highlightUpperSlice':
+      applyVideoUpperSliceHighlightState(state, action);
       break;
     case 'hideGraph':
       state.visibilityMode = VIDEO_GRAPH_VISIBILITY.HIDDEN;
