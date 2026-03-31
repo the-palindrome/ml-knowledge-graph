@@ -97,6 +97,8 @@ Supported script actions:
 
 Camera actions are interpolated over `duration` and are smooth by default.
 If `duration` is omitted on a camera action, a default smooth duration is used.
+`autoRotate` supports optional smooth wind-up and wind-down via `windUp` and `windDown` (seconds).
+Both default to `0`; set either above `0` to enable that phase.
 
 Aliases are accepted for convenience:
 `select`, `unselect`, `focus`, `focusCamera`, `move`, `cameraMove`, `rotateCamera`, `openNodeTooltip`, `closeNodeTooltip`.

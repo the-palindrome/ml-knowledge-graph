@@ -281,11 +281,16 @@ Optional:
 
 ### `autoRotate`
 Like `orbit`, but with a non-zero default rotation speed.
+Rotation speed can include an optional smooth wind-up at the beginning and wind-down near the end.
 
 Optional:
 
 - `axis` (`"x" | "y" | "z"`, default `"y"`)
 - `speed` (number, default `0.2`)
+- `windUp` (number in seconds, default `0`)
+  - set `0` for no wind-up
+- `windDown` (number in seconds, default `0`)
+  - set `0` for no wind-down
 - `pivot` (vec3)
 - `pivotNodeId` (string)
 - `targetNodeId` (string): accepted as pivot node alias

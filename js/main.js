@@ -1586,6 +1586,55 @@ function easeVideoProgress(progress, easing) {
   }
 }
 
+function integrateSmoothStep01(value) {
+  const t = clamp01(value);
+  return (t * t * t) - (0.5 * t * t * t * t);
+}
+
+function applyAutoRotateRampProgress(progress, duration, windUpDuration, windDownDuration) {
+  const t = clamp01(progress);
+  const totalDuration = Math.max(toFiniteNumber(duration, 0), VIDEO_DURATION_EPSILON);
+  let windUp = clampNonNegative(windUpDuration, 0);
+  let windDown = clampNonNegative(windDownDuration, 0);
+
+  const combinedWindDuration = windUp + windDown;
+  if (combinedWindDuration > totalDuration) {
+    const scale = totalDuration / combinedWindDuration;
+    windUp *= scale;
+    windDown *= scale;
+  }
+
+  const windUpFraction = windUp / totalDuration;
+  const windDownFraction = windDown / totalDuration;
+  if (windUpFraction <= VIDEO_DURATION_EPSILON && windDownFraction <= VIDEO_DURATION_EPSILON) {
+    return t;
+  }
+
+  const rampEnd = windUpFraction;
+  const rampStart = 1 - windDownFraction;
+  const totalArea = 1 - (0.5 * (windUpFraction + windDownFraction));
+
+  if (t < rampEnd && windUpFraction > VIDEO_DURATION_EPSILON) {
+    const phase = t / windUpFraction;
+    const area = windUpFraction * integrateSmoothStep01(phase);
+    return area / totalArea;
+  }
+
+  if (t <= rampStart) {
+    const area = (0.5 * windUpFraction) + (t - rampEnd);
+    return area / totalArea;
+  }
+
+  if (windDownFraction <= VIDEO_DURATION_EPSILON) {
+    return t;
+  }
+
+  const remainingPhase = (1 - t) / windDownFraction;
+  const remainingArea = windDownFraction * integrateSmoothStep01(remainingPhase);
+  const area = totalArea - remainingArea;
+  return area / totalArea;
+}
+
 function toVideoNodeSlug(value) {
   return String(value ?? '')
     .trim()
@@ -1757,6 +1806,17 @@ function normalizeVideoTooltipSize(rawSize, actionName, index) {
   return size;
 }
 
+function normalizeVideoAutoRotateWindDuration(value, fieldName, actionName, index) {
+  if (value == null) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(
+      `Action "${actionName}" at index ${index} has invalid ${fieldName}; expected a non-negative number.`,
+    );
+  }
+  return parsed;
+}
+
 function normalizeVideoAction(rawAction, index) {
   if (!rawAction || typeof rawAction !== 'object' || Array.isArray(rawAction)) {
     throw new Error(`Action at index ${index} must be an object.`);
@@ -1820,6 +1880,25 @@ function normalizeVideoAction(rawAction, index) {
     normalized.axis = axis;
     const defaultSpeed = actionName === 'autoRotate' ? VIDEO_DEFAULT_AUTO_ROTATE_SPEED : 0;
     normalized.speed = toFiniteNumber(rawAction.speed, defaultSpeed);
+    if (actionName === 'autoRotate') {
+      normalized.windUp = normalizeVideoAutoRotateWindDuration(
+        rawAction.windUp,
+        'windUp',
+        declaredActionName,
+        index,
+      ) ?? 0;
+      normalized.windDown = normalizeVideoAutoRotateWindDuration(
+        rawAction.windDown,
+        'windDown',
+        declaredActionName,
+        index,
+      ) ?? 0;
+      // Backward compatibility for older scripts that used `ramp: false`.
+      if (rawAction.ramp === false) {
+        normalized.windUp = 0;
+        normalized.windDown = 0;
+      }
+    }
 
     const pivot = parseVideoVec3(rawAction.pivot, 'pivot', declaredActionName, index);
     const pivotNodeRef = rawAction.pivotNodeId ?? rawAction.targetNodeId;
@@ -2323,7 +2402,11 @@ function applyVideoActionAtTime(state, action, timelineTime) {
   const cameraProgress = isCameraTimelineAction(action.action)
     ? easeVideoProgress(progress, action.easing)
     : progress;
-  const effectiveElapsed = hasDuration ? action.duration * cameraProgress : 0;
+  const shouldApplyAutoRotateWindProfile = action.action === 'autoRotate';
+  const rotationProgress = shouldApplyAutoRotateWindProfile
+    ? applyAutoRotateRampProgress(cameraProgress, action.duration, action.windUp, action.windDown)
+    : cameraProgress;
+  const effectiveElapsed = hasDuration ? action.duration * rotationProgress : 0;
 
   if (isVideoSceneStateAction(action.action)) {
     state.sceneVersion += 1;
