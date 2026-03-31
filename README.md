@@ -60,6 +60,23 @@ window.graphVideo = {
 };
 ```
 
+`runScript` accepts either:
+
+- a legacy action array
+- an object payload:
+
+```json
+{
+  "cameraStart": { "position": { "x": 0, "y": 0, "z": 500 }, "target": { "x": 0, "y": 0, "z": 0 } },
+  "cameraEnd": { "position": { "x": 40, "y": 20, "z": 700 }, "target": { "x": 0, "y": 0, "z": 0 } },
+  "script": [
+    { "at": 0, "action": "focusNode", "nodeId": "gradient-descent" }
+  ]
+}
+```
+
+`cameraStart` is optional (defaults to the current camera). `cameraEnd` is optional and informative only; the renderer does not use it.
+
 Supported script actions:
 
 - `selectNode` / `unselectNode`

@@ -37,15 +37,20 @@ During scripted rendering, the page enters `video-render-mode`:
 Loads and validates a timeline script, switches to deterministic render mode, and seeks to `t=0`.
 
 - `script`: either
-  - an array of action objects
-  - a JSON string encoding an array of action objects
+  - a legacy array of action objects
+  - an object with `{ script, cameraStart?, cameraEnd? }`
+  - a JSON string encoding either:
+    - a legacy array of action objects
+    - an object with `{ script, cameraStart?, cameraEnd? }`
 
 Returns:
 
 ```json
 {
   "duration": 13.3,
-  "actionCount": 10
+  "actionCount": 10,
+  "cameraStart": { "position": { "x": 0, "y": 0, "z": 500 }, "target": { "x": 0, "y": 0, "z": 0 } },
+  "cameraEnd": { "position": { "x": 40, "y": 20, "z": 700 }, "target": { "x": 0, "y": 0, "z": 0 } }
 }
 ```
 
@@ -82,14 +87,28 @@ Returns numeric timeline duration in seconds.
 
 ## 3. Timeline Script Format
 
-A timeline script is an array of action objects:
+A timeline script payload is an object:
 
 ```json
-[
-  { "at": 0.0, "action": "focusNode", "nodeId": "gradient-descent" },
-  { "at": 1.0, "action": "autoRotate", "axis": "y", "speed": 0.25, "duration": 4.0 }
-]
+{
+  "cameraStart": {
+    "position": { "x": 0, "y": 0, "z": 500 },
+    "target": { "x": 0, "y": 0, "z": 0 }
+  },
+  "cameraEnd": {
+    "position": { "x": 40, "y": 20, "z": 700 },
+    "target": { "x": 0, "y": 0, "z": 0 }
+  },
+  "script": [
+    { "at": 0.0, "action": "focusNode", "nodeId": "gradient-descent" },
+    { "at": 1.0, "action": "autoRotate", "axis": "y", "speed": 0.25, "duration": 4.0 }
+  ]
+}
 ```
+
+- `script` is required and contains the action-array format used previously.
+- `cameraStart` is optional; if omitted, the current/default camera state is used.
+- `cameraEnd` is optional and informative only. Rendering ignores it and does not move the camera to it automatically.
 
 ## Common fields
 

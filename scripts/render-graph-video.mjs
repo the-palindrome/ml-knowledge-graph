@@ -24,7 +24,7 @@ function printUsage() {
   node scripts/render-graph-video.mjs --script ./scripts/video-script.example.json [options]
 
 Required:
-  --script, -s       Path to JSON action script
+  --script, -s       Path to JSON timeline script config
 
 Options:
   --output, -o       Output video path (default: ./tmp/graph-video.mp4)
@@ -672,9 +672,14 @@ async function main() {
   const scriptPath = path.resolve(args.scriptPath);
   logger.info(`Loading timeline script: ${scriptPath}`);
   const scriptContents = await fs.readFile(scriptPath, 'utf8');
-  const actions = JSON.parse(scriptContents);
+  const scriptPayload = JSON.parse(scriptContents);
+  const actions = Array.isArray(scriptPayload)
+    ? scriptPayload
+    : scriptPayload?.script;
   if (!Array.isArray(actions)) {
-    throw new Error(`Script file must contain a JSON array: ${scriptPath}`);
+    throw new Error(
+      `Script file must contain either a JSON action array or an object with a "script" action array: ${scriptPath}`,
+    );
   }
   logger.info(`Loaded ${actions.length} action(s).`);
   if (args.verbose) {
@@ -753,9 +758,9 @@ async function main() {
         () => window.graphVideo && typeof window.graphVideo.runScript === 'function',
         { timeout: GRAPH_API_TIMEOUT_MS },
       );
-      return page.evaluate((timelineActions) => {
-        return window.graphVideo.runScript(timelineActions);
-      }, actions);
+      return page.evaluate((timelineScript) => {
+        return window.graphVideo.runScript(timelineScript);
+      }, scriptPayload);
     };
 
     let runSummary = await initializeRenderPage();

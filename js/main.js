@@ -197,6 +197,7 @@ const videoTimelineState = {
   actions: [],
   duration: 0,
   baseCameraState: null,
+  cameraEnd: null,
   active: false,
   currentTime: 0,
   appliedSceneVersion: null,
@@ -1674,16 +1675,85 @@ function canonicalVideoActionName(actionName) {
   return VIDEO_ACTION_ALIASES.get(actionName) ?? actionName;
 }
 
-function parseVideoScriptInput(scriptInput) {
-  if (Array.isArray(scriptInput)) return scriptInput;
-  if (typeof scriptInput === 'string') {
-    const parsed = JSON.parse(scriptInput);
-    if (!Array.isArray(parsed)) {
-      throw new Error('Video script string must decode to an array of actions.');
+function parseVideoScriptVec3(value, fieldName) {
+  let x;
+  let y;
+  let z;
+
+  if (Array.isArray(value)) {
+    if (value.length < 3) {
+      throw new Error(`Video script "${fieldName}" must provide [x, y, z].`);
     }
-    return parsed;
+    [x, y, z] = value;
+  } else if (value && typeof value === 'object') {
+    x = value.x;
+    y = value.y;
+    z = value.z;
+  } else {
+    throw new Error(`Video script "${fieldName}" must be a vec3 object or [x, y, z].`);
   }
-  throw new Error('Video script must be an array or JSON string.');
+
+  const normalized = {
+    x: Number(x),
+    y: Number(y),
+    z: Number(z),
+  };
+
+  if (!Number.isFinite(normalized.x)
+    || !Number.isFinite(normalized.y)
+    || !Number.isFinite(normalized.z)) {
+    throw new Error(`Video script "${fieldName}" must contain finite coordinates.`);
+  }
+
+  return normalized;
+}
+
+function parseVideoScriptCameraState(value, fieldName) {
+  if (value == null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Video script "${fieldName}" must be an object with position and target.`);
+  }
+  if (!('position' in value)) {
+    throw new Error(`Video script "${fieldName}" must include a "position" field.`);
+  }
+  if (!('target' in value)) {
+    throw new Error(`Video script "${fieldName}" must include a "target" field.`);
+  }
+
+  return {
+    position: parseVideoScriptVec3(value.position, `${fieldName}.position`),
+    target: parseVideoScriptVec3(value.target, `${fieldName}.target`),
+  };
+}
+
+function parseVideoScriptInput(scriptInput) {
+  if (typeof scriptInput === 'string') {
+    return parseVideoScriptInput(JSON.parse(scriptInput));
+  }
+
+  if (Array.isArray(scriptInput)) {
+    return {
+      script: scriptInput,
+      cameraStart: null,
+      cameraEnd: null,
+    };
+  }
+
+  if (!scriptInput || typeof scriptInput !== 'object') {
+    throw new Error(
+      'Video script must be an action array or an object with { script, cameraStart?, cameraEnd? }.',
+    );
+  }
+
+  if (!Array.isArray(scriptInput.script)) {
+    throw new Error('Video script object must include a "script" array of actions.');
+  }
+
+  return {
+    script: scriptInput.script,
+    cameraStart: parseVideoScriptCameraState(scriptInput.cameraStart, 'cameraStart'),
+    cameraEnd: parseVideoScriptCameraState(scriptInput.cameraEnd, 'cameraEnd'),
+  };
 }
 
 function actionRequiresNodeId(actionName) {
@@ -1943,8 +2013,8 @@ function normalizeVideoAction(rawAction, index) {
 }
 
 function normalizeVideoScript(scriptInput) {
-  const script = parseVideoScriptInput(scriptInput);
-  const actions = script
+  const parsedScript = parseVideoScriptInput(scriptInput);
+  const actions = parsedScript.script
     .map((rawAction, index) => normalizeVideoAction(rawAction, index))
     .sort((a, b) => {
       if (a.at !== b.at) return a.at - b.at;
@@ -1963,7 +2033,11 @@ function normalizeVideoScript(scriptInput) {
     activeCameraAnimationEnd = action.at + action.duration;
   }
 
-  return actions;
+  return {
+    actions,
+    cameraStart: parsedScript.cameraStart,
+    cameraEnd: parsedScript.cameraEnd,
+  };
 }
 
 function computeVideoScriptDuration(actions) {
@@ -2667,11 +2741,17 @@ function enableVideoRenderMode() {
 
 async function runVideoScript(scriptInput) {
   videoNodeLookupMap = null;
-  const actions = normalizeVideoScript(scriptInput);
+  const normalizedScript = normalizeVideoScript(scriptInput);
+  const actions = normalizedScript.actions;
+  const fallbackCameraState = cloneCameraState(Renderer.getCameraState());
+  const cameraStartState = cloneCameraState(
+    normalizedScript.cameraStart ?? fallbackCameraState,
+  );
 
   videoTimelineState.actions = actions;
   videoTimelineState.duration = computeVideoScriptDuration(actions);
-  videoTimelineState.baseCameraState = cloneCameraState(Renderer.getCameraState());
+  videoTimelineState.baseCameraState = cameraStartState;
+  videoTimelineState.cameraEnd = cloneCameraState(normalizedScript.cameraEnd);
   videoTimelineState.active = true;
   videoTimelineState.currentTime = 0;
   videoTimelineState.appliedSceneVersion = null;
@@ -2683,6 +2763,8 @@ async function runVideoScript(scriptInput) {
     duration: videoTimelineState.duration,
     actionCount: videoTimelineState.actions.length,
     initialFrameState,
+    cameraStart: cloneCameraState(videoTimelineState.baseCameraState),
+    cameraEnd: cloneCameraState(videoTimelineState.cameraEnd),
   };
 }
 

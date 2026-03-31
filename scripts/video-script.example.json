@@ -1,68 +1,74 @@
-[
-  {
-    "at": 0.0,
-    "action": "focusNode",
-    "nodeId": "gradient-descent",
-    "highlightPrerequisites": true,
-    "highlightDependents": true
-  },
-  {
-    "at": 1.3,
-    "action": "moveCamera",
-    "delta": [0, 20, 0],
-    "duration": 1.1,
-    "easing": "ease-in-out"
-  },
-  {
-    "at": 2.6,
-    "action": "autoRotate",
-    "axis": "y",
-    "speed": 0.22,
-    "duration": 3.0
-  },
-  {
-    "at": 5.7,
-    "action": "cameraFocus",
-    "nodeId": "stochastic-gradient-descent",
-    "duration": 1.2
-  },
-  {
-    "at": 7.0,
-    "action": "zoomTo",
-    "distance": 180,
-    "duration": 1.5
-  },
-  {
-    "at": 8.7,
-    "action": "openTooltip",
-    "nodeId": "gradient-descent"
-  },
-  {
-    "at": 9.3,
-    "action": "fadeLabel",
-    "nodeId": "stochastic-gradient-descent",
-    "opacity": 1,
-    "duration": 1.0
-  },
-  {
-    "at": 10.8,
-    "action": "hideGraph"
-  },
-  {
-    "at": 11.8,
-    "action": "revealGraph"
-  },
-  {
-    "at": 12.3,
-    "action": "fadeGraph"
-  },
-  {
-    "at": 12.8,
-    "action": "closeAllTooltips",
-    "duration": 0.4
-  },
-  {
-    "at": 13.3,
-    "action": "unselectNode"
-  }
-]
+{
+  "script": [
+    {
+      "at": 0,
+      "action": "focusNode",
+      "nodeId": "gradient-descent",
+      "highlightPrerequisites": true,
+      "highlightDependents": true
+    },
+    {
+      "at": 1.3,
+      "action": "moveCamera",
+      "delta": [
+        0,
+        20,
+        0
+      ],
+      "duration": 1.1,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 2.6,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.22,
+      "duration": 3
+    },
+    {
+      "at": 5.7,
+      "action": "cameraFocus",
+      "nodeId": "stochastic-gradient-descent",
+      "duration": 1.2
+    },
+    {
+      "at": 7,
+      "action": "zoomTo",
+      "distance": 180,
+      "duration": 1.5
+    },
+    {
+      "at": 8.7,
+      "action": "openTooltip",
+      "nodeId": "gradient-descent"
+    },
+    {
+      "at": 9.3,
+      "action": "fadeLabel",
+      "nodeId": "stochastic-gradient-descent",
+      "opacity": 1,
+      "duration": 1
+    },
+    {
+      "at": 10.8,
+      "action": "hideGraph"
+    },
+    {
+      "at": 11.8,
+      "action": "revealGraph"
+    },
+    {
+      "at": 12.3,
+      "action": "fadeGraph"
+    },
+    {
+      "at": 12.8,
+      "action": "closeAllTooltips",
+      "duration": 0.4
+    },
+    {
+      "at": 13.3,
+      "action": "unselectNode"
+    }
+  ]
+}
