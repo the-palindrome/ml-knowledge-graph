@@ -8,7 +8,8 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { getCategoryColor } from "./graph.js";
 
 let scene, camera, renderer, controls;
-let instancedMesh = null;
+let opaqueNodeMesh = null;
+let transparentNodeMesh = null;
 let edgeLines = null;
 let edgeArrows = null;
 let edgeMat = null;
@@ -37,6 +38,7 @@ let activeCameraAnimation = null;
 let renderLoopStarted = false;
 let renderLoopPaused = false;
 let videoRenderMode = false;
+let edgeDirectionVisible = true;
 let postRenderCallback = null;
 let pngEncoderWarmed = false;
 let screenshotCanvas = null;
@@ -73,7 +75,7 @@ const cameraStateTarget = new THREE.Vector3();
 const ARROW_RADIUS = 1.0;
 const ARROW_HEIGHT = 2.4;
 const ARROWS_PER_EDGE = 5;
-const SHOW_EDGE_ARROWS = false;
+const SHOW_EDGE_ARROWS = true;
 const ARROW_T_START = 0.08;
 const ARROW_T_END = 0.92;
 const DEFAULT_EDGE_CURVE_SEGMENTS = 24;
@@ -87,6 +89,8 @@ const ANIMATION_PIXEL_RATIO = 1.0;
 const DEFAULT_NODE_GEOMETRY_DETAIL = { widthSegments: 32, heightSegments: 24 };
 const VIDEO_NODE_GEOMETRY_DETAIL = { widthSegments: 6, heightSegments: 4 };
 const NODE_BASE_OPACITY = 1.0;
+const OPAQUE_NODE_ALPHA_CUTOFF = 0.999;
+const HIDDEN_NODE_ALPHA_EPSILON = 0.001;
 const NODE_COLOR_TRANSITION_DURATION_MS = 320;
 const NODE_SCALE_TRANSITION_DURATION_MS = 320;
 const TRANSITION_COMPLETE_EPSILON = 1e-6;
@@ -107,6 +111,52 @@ function getNodeGeometryForCurrentMode() {
   return createNodeGeometry(
     videoRenderMode ? VIDEO_NODE_GEOMETRY_DETAIL : DEFAULT_NODE_GEOMETRY_DETAIL,
   );
+}
+
+function forEachNodeMesh(visitor) {
+  if (opaqueNodeMesh) visitor(opaqueNodeMesh, "opaque");
+  if (transparentNodeMesh) visitor(transparentNodeMesh, "transparent");
+}
+
+function hasNodeMeshes() {
+  return Boolean(opaqueNodeMesh && transparentNodeMesh);
+}
+
+function createNodeMaterial(pass) {
+  const isTransparentPass = pass === "transparent";
+  const material = new THREE.MeshPhongMaterial({
+    color: 0xffffff,
+    transparent: isTransparentPass,
+    opacity: NODE_BASE_OPACITY,
+    depthTest: true,
+    depthWrite: !isTransparentPass,
+    shininess: 6,
+    specular: new THREE.Color(0x22252d),
+    emissive: new THREE.Color(0x090b11),
+  });
+
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = `
+attribute float instanceOpacity;
+varying float vInstanceOpacity;
+${shader.vertexShader}`.replace(
+      "#include <begin_vertex>",
+      "#include <begin_vertex>\n  vInstanceOpacity = instanceOpacity;",
+    );
+
+    shader.fragmentShader = `
+varying float vInstanceOpacity;
+${shader.fragmentShader}`.replace(
+      "vec4 diffuseColor = vec4( diffuse, opacity );",
+      isTransparentPass
+        ? `if (vInstanceOpacity <= ${HIDDEN_NODE_ALPHA_EPSILON.toFixed(3)} || vInstanceOpacity >= ${OPAQUE_NODE_ALPHA_CUTOFF.toFixed(3)}) discard;
+vec4 diffuseColor = vec4( diffuse, opacity * vInstanceOpacity );`
+        : `if (vInstanceOpacity < ${OPAQUE_NODE_ALPHA_CUTOFF.toFixed(3)}) discard;
+vec4 diffuseColor = vec4( diffuse, opacity );`,
+    );
+  };
+  material.customProgramCacheKey = () => `node-instance-opacity-${pass}-v1`;
+  return material;
 }
 
 function getEdgeCurveSegments() {
@@ -155,7 +205,7 @@ function setNodeScaleState(index, scale) {
 }
 
 function applyNodeColorStateToMesh() {
-  if (!instancedMesh || !nodes || !nodeColorCurrentArray || !nodeAlphaCurrentArray) return;
+  if (!hasNodeMeshes() || !nodes || !nodeColorCurrentArray || !nodeAlphaCurrentArray) return;
 
   for (let i = 0; i < nodes.length; i++) {
     const colorOffset = i * 3;
@@ -164,22 +214,26 @@ function applyNodeColorStateToMesh() {
       nodeColorCurrentArray[colorOffset + 1],
       nodeColorCurrentArray[colorOffset + 2],
     );
-    instancedMesh.setColorAt(i, tempColor);
+    forEachNodeMesh((mesh) => {
+      mesh.setColorAt(i, tempColor);
+    });
     if (nodeOpacityArray) {
       nodeOpacityArray[i] = nodeAlphaCurrentArray[i];
     }
   }
 
-  if (instancedMesh.instanceColor) {
-    instancedMesh.instanceColor.needsUpdate = true;
-  }
-  if (instancedMesh.geometry.attributes.instanceOpacity) {
-    instancedMesh.geometry.attributes.instanceOpacity.needsUpdate = true;
-  }
+  forEachNodeMesh((mesh) => {
+    if (mesh.instanceColor) {
+      mesh.instanceColor.needsUpdate = true;
+    }
+    if (mesh.geometry.attributes.instanceOpacity) {
+      mesh.geometry.attributes.instanceOpacity.needsUpdate = true;
+    }
+  });
 }
 
 function applyNodeTransformStateToMesh() {
-  if (!instancedMesh || !nodes) return;
+  if (!hasNodeMeshes() || !nodes) return;
 
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
@@ -189,11 +243,15 @@ function applyNodeTransformStateToMesh() {
     dummy.position.set(n.x, n.y, n.z);
     dummy.scale.setScalar(scale);
     dummy.updateMatrix();
-    instancedMesh.setMatrixAt(i, dummy.matrix);
+    forEachNodeMesh((mesh) => {
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
   }
 
-  instancedMesh.instanceMatrix.needsUpdate = true;
-  instancedMesh.boundingSphere = null; // invalidate so raycaster recomputes after layout change
+  forEachNodeMesh((mesh) => {
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.boundingSphere = null; // invalidate so raycaster recomputes after layout change
+  });
 }
 
 function hasMeaningfulDelta(currentValue, targetValue) {
@@ -440,35 +498,19 @@ export function createNodes(nodeArray) {
   nodeOpacityArray.fill(1);
   initializeNodeVisualState(nodes.length);
 
-  const geometry = getNodeGeometryForCurrentMode();
-  const material = new THREE.MeshPhongMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: NODE_BASE_OPACITY,
-    shininess: 6,
-    specular: new THREE.Color(0x22252d),
-    emissive: new THREE.Color(0x090b11),
-  });
-  material.onBeforeCompile = (shader) => {
-    shader.vertexShader = `
-attribute float instanceOpacity;
-varying float vInstanceOpacity;
-${shader.vertexShader}`.replace(
-      "#include <begin_vertex>",
-      "#include <begin_vertex>\n  vInstanceOpacity = instanceOpacity;",
-    );
+  const opaqueGeometry = getNodeGeometryForCurrentMode();
+  const transparentGeometry = getNodeGeometryForCurrentMode();
+  const opaqueMaterial = createNodeMaterial("opaque");
+  const transparentMaterial = createNodeMaterial("transparent");
 
-    shader.fragmentShader = `
-varying float vInstanceOpacity;
-${shader.fragmentShader}`.replace(
-      "vec4 diffuseColor = vec4( diffuse, opacity );",
-      "vec4 diffuseColor = vec4( diffuse, opacity * vInstanceOpacity );",
-    );
-  };
-  material.customProgramCacheKey = () => "node-instance-opacity-v2";
-
-  instancedMesh = new THREE.InstancedMesh(geometry, material, nodes.length);
-  instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  opaqueNodeMesh = new THREE.InstancedMesh(opaqueGeometry, opaqueMaterial, nodes.length);
+  transparentNodeMesh = new THREE.InstancedMesh(
+    transparentGeometry,
+    transparentMaterial,
+    nodes.length,
+  );
+  opaqueNodeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  transparentNodeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
@@ -477,21 +519,30 @@ ${shader.fragmentShader}`.replace(
       ? node._currentScale
       : node._baseScale;
     tempColor.setHSL(h, s, l);
-    instancedMesh.setColorAt(i, tempColor);
+    opaqueNodeMesh.setColorAt(i, tempColor);
+    transparentNodeMesh.setColorAt(i, tempColor);
     setNodeColorState(i, h, s, l, 1);
     setNodeScaleState(i, scale);
 
     dummy.position.set(node.x, node.y, node.z);
     dummy.scale.setScalar(scale);
     dummy.updateMatrix();
-    instancedMesh.setMatrixAt(i, dummy.matrix);
+    opaqueNodeMesh.setMatrixAt(i, dummy.matrix);
+    transparentNodeMesh.setMatrixAt(i, dummy.matrix);
   }
 
-  instancedMesh.instanceColor.needsUpdate = true;
-  instancedMesh.instanceMatrix.needsUpdate = true;
-  instancedMesh.geometry.attributes.instanceOpacity.needsUpdate = true;
-  instancedMesh.renderOrder = 2; // render nodes on top of edges
-  scene.add(instancedMesh);
+  opaqueNodeMesh.instanceColor.needsUpdate = true;
+  opaqueNodeMesh.instanceMatrix.needsUpdate = true;
+  opaqueNodeMesh.geometry.attributes.instanceOpacity.needsUpdate = true;
+  opaqueNodeMesh.renderOrder = 2;
+
+  transparentNodeMesh.instanceColor.needsUpdate = true;
+  transparentNodeMesh.instanceMatrix.needsUpdate = true;
+  transparentNodeMesh.geometry.attributes.instanceOpacity.needsUpdate = true;
+  transparentNodeMesh.renderOrder = 3;
+
+  scene.add(opaqueNodeMesh);
+  scene.add(transparentNodeMesh);
 }
 
 // --- Edge lines (thick with arrows) ---
@@ -610,6 +661,18 @@ function hideArrowInstance(arrowMesh, instanceIdx) {
   arrowMesh.setMatrixAt(instanceIdx, dummy.matrix);
 }
 
+function shouldShowHighlightedArrowheads() {
+  return edgeDirectionVisible && !videoRenderMode && !animationPerformanceMode;
+}
+
+function syncHighlightedArrowVisibility() {
+  for (const layer of highlightLayers) {
+    if (layer.arrows) {
+      layer.arrows.visible = shouldShowHighlightedArrowheads();
+    }
+  }
+}
+
 function forEachEdgeLayer(visitor) {
   visitor({
     lines: edgeLines,
@@ -643,26 +706,8 @@ function buildEdgeArrows() {
     edgeArrows.material.dispose();
   }
 
-  if (!SHOW_EDGE_ARROWS) {
-    edgeArrows = null;
-    return;
-  }
-
-  const coneGeo = makeArrowGeometry(ARROW_RADIUS, ARROW_HEIGHT);
-
-  const coneMat = new THREE.MeshBasicMaterial({
-    color: 0x2f353d,
-    transparent: true,
-    opacity: 0.38,
-    depthWrite: false,
-  });
-
-  const totalArrows = edgeList.length * ARROWS_PER_EDGE;
-  edgeArrows = new THREE.InstancedMesh(coneGeo, coneMat, totalArrows);
-  edgeArrows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  positionArrows(edgeArrows, edgeList);
-  edgeArrows.visible = !videoRenderMode && !animationPerformanceMode;
-  scene.add(edgeArrows);
+  // Base graph edges stay arrow-free; only highlighted edges render direction markers.
+  edgeArrows = null;
 }
 
 function positionArrows(arrowMesh, list) {
@@ -786,7 +831,7 @@ function createEdgeDescriptor(si, ti) {
 // --- Position / visual updates ---
 
 export function updateNodeTransforms(options = {}) {
-  if (!instancedMesh || !nodes) return;
+  if (!hasNodeMeshes() || !nodes) return;
 
   const now = performance.now();
   advanceVisualTransitions(now, { applyColors: false, applyTransforms: false });
@@ -834,7 +879,7 @@ export function updatePositions(options = {}) {
 }
 
 export function updateColors(colorMap, options = {}) {
-  if (!instancedMesh) return;
+  if (!hasNodeMeshes()) return;
   const now = performance.now();
   advanceVisualTransitions(now, { applyColors: false, applyTransforms: false });
 
@@ -908,10 +953,11 @@ export function updateColors(colorMap, options = {}) {
 export function setEdgeOpacity(opacity) {
   if (edgeMat) edgeMat.opacity = opacity;
   if (edgeLines) edgeLines.visible = opacity > 0.001;
-  if (edgeArrows) {
-    edgeArrows.material.opacity = opacity;
-    edgeArrows.visible = opacity > 0.001 && !videoRenderMode && !animationPerformanceMode;
-  }
+}
+
+export function setEdgeDirectionVisible(enabled) {
+  edgeDirectionVisible = Boolean(enabled);
+  syncHighlightedArrowVisibility();
 }
 
 // --- Highlight edges ---
@@ -1011,7 +1057,7 @@ function createHighlightLayer(
   arrows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   arrows.renderOrder = 1;
   positionArrows(arrows, pairs);
-  arrows.visible = !videoRenderMode && !animationPerformanceMode;
+  arrows.visible = shouldShowHighlightedArrowheads();
   scene.add(arrows);
 
   return {
@@ -1048,7 +1094,7 @@ export function setAnimationPerformanceMode(enabled) {
 
   forEachEdgeLayer((layer) => {
     if (layer.arrows) {
-      layer.arrows.visible = !animationPerformanceMode;
+      layer.arrows.visible = shouldShowHighlightedArrowheads();
     }
   });
 
@@ -1067,12 +1113,26 @@ export function setAnimationPerformanceMode(enabled) {
 // --- Raycasting ---
 
 export function getNodeAtScreen(mx, my) {
-  if (!instancedMesh) return null;
+  if (!hasNodeMeshes()) return null;
   mouseVec.set(mx, my);
   raycaster.setFromCamera(mouseVec, camera);
-  const hits = raycaster.intersectObject(instancedMesh);
-  if (hits.length > 0) {
-    return nodes[hits[0].instanceId].id;
+  const hits = [
+    ...raycaster.intersectObject(opaqueNodeMesh),
+    ...raycaster.intersectObject(transparentNodeMesh),
+  ].sort((a, b) => a.distance - b.distance);
+
+  for (const hit of hits) {
+    const instanceId = hit.instanceId;
+    if (instanceId == null) continue;
+    const alpha = nodeAlphaCurrentArray?.[instanceId] ?? 1;
+    if (alpha <= HIDDEN_NODE_ALPHA_EPSILON) continue;
+    const belongsToOpaquePass = alpha >= OPAQUE_NODE_ALPHA_CUTOFF;
+    if (hit.object === opaqueNodeMesh && belongsToOpaquePass) {
+      return nodes[instanceId].id;
+    }
+    if (hit.object === transparentNodeMesh && !belongsToOpaquePass) {
+      return nodes[instanceId].id;
+    }
   }
   return null;
 }
@@ -1172,19 +1232,19 @@ export function setVideoRenderMode(enabled) {
   if (videoRenderMode === nextMode) return;
   videoRenderMode = nextMode;
 
-  if (instancedMesh) {
-    const previousGeometry = instancedMesh.geometry;
-    instancedMesh.geometry = getNodeGeometryForCurrentMode();
+  forEachNodeMesh((mesh) => {
+    const previousGeometry = mesh.geometry;
+    mesh.geometry = getNodeGeometryForCurrentMode();
     previousGeometry.dispose();
-    instancedMesh.geometry.attributes.instanceOpacity.needsUpdate = true;
-  }
+    mesh.geometry.attributes.instanceOpacity.needsUpdate = true;
+  });
 
   forEachEdgeLayer((layer) => {
     if (layer.lines && layer.edgeList && layer.positions) {
       layer.positions = updateLinePositions(layer.lines, layer.edgeList, layer.positions);
     }
     if (layer.arrows) {
-      layer.arrows.visible = !videoRenderMode && !animationPerformanceMode;
+      layer.arrows.visible = shouldShowHighlightedArrowheads();
     }
   });
 

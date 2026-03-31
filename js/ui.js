@@ -245,6 +245,18 @@ export function setupAnchorTooltipOnSelection(onChange) {
   emitChange();
 }
 
+export function setupShowEdgeDirection(onChange) {
+  const checkbox = document.getElementById("show-edge-direction");
+  if (!checkbox) return;
+
+  const emitChange = () => {
+    onChange(Boolean(checkbox.checked));
+  };
+
+  checkbox.addEventListener("change", emitChange);
+  emitChange();
+}
+
 export function setupSettingsPanel() {
   const settingsButton = document.getElementById("settings-btn");
   const closeButton = document.getElementById("settings-close");

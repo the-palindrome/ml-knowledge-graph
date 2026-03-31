@@ -256,6 +256,7 @@ async function init() {
   UI.setupNodeSizing(handleNodeSizingModeChange);
   UI.setupExplorerTooltipSize(handleExplorerTooltipSizeChange);
   UI.setupAnchorTooltipOnSelection(handleAnchorTooltipOnSelectionChange);
+  UI.setupShowEdgeDirection(handleShowEdgeDirectionChange);
   UI.setupInfoPanels();
   UI.setupPathHighlightToggles(handlePathHighlightToggleChange);
   UI.setPathHighlightToggleState(pathHighlightState);
@@ -728,6 +729,10 @@ function handleExplorerTooltipSizeChange(nextSize) {
   if (!VIDEO_TOOLTIP_SIZE_OPTIONS.has(nextSize) || nextSize === explorerTooltipSize) return;
   explorerTooltipSize = nextSize;
   syncActiveExplorerTooltips();
+}
+
+function handleShowEdgeDirectionChange(enabled) {
+  Renderer.setEdgeDirectionVisible(enabled);
 }
 
 // --- Hover / Tooltips ---
