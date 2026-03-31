@@ -564,7 +564,7 @@ export function createEdges(edges, nodeArray) {
   geo.setPositions(edgePositions);
 
   edgeMat = new LineMaterial({
-    color: 0x2c3138,
+    color: 0x48505b,
     linewidth: EDGE_LINE_WIDTH,
     transparent: true,
     opacity: 0.18,
