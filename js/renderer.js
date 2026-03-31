@@ -19,6 +19,17 @@ let nodes = null;
 let edgeList = null;
 let nodeIdToIndex = null;
 let nodeOpacityArray = null;
+let nodeColorCurrentArray = null;
+let nodeColorStartArray = null;
+let nodeColorTargetArray = null;
+let nodeAlphaCurrentArray = null;
+let nodeAlphaStartArray = null;
+let nodeAlphaTargetArray = null;
+let nodeScaleCurrentArray = null;
+let nodeScaleStartArray = null;
+let nodeScaleTargetArray = null;
+let activeColorTransition = null;
+let activeScaleTransition = null;
 let animationPerformanceMode = false;
 let animationPerformanceRequests = 0;
 let deferredArrowRefresh = false;
@@ -74,6 +85,10 @@ const DEFAULT_MAX_PIXEL_RATIO = 2.0;
 const ANIMATION_PIXEL_RATIO = 1.0;
 const DEFAULT_NODE_GEOMETRY_DETAIL = { widthSegments: 32, heightSegments: 24 };
 const VIDEO_NODE_GEOMETRY_DETAIL = { widthSegments: 6, heightSegments: 4 };
+const NODE_COLOR_TRANSITION_DURATION_MS = 320;
+const NODE_SCALE_TRANSITION_DURATION_MS = 320;
+const TRANSITION_COMPLETE_EPSILON = 1e-6;
+const TRANSITION_VALUE_EPSILON = 1e-4;
 
 function createNodeGeometry({ widthSegments, heightSegments }) {
   const geometry = new THREE.SphereGeometry(1, widthSegments, heightSegments);
@@ -98,6 +113,162 @@ function getEdgeCurveSegments() {
 
 function smootherStep(t) {
   return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function initializeNodeVisualState(nodeCount) {
+  nodeColorCurrentArray = new Float32Array(nodeCount * 3);
+  nodeColorStartArray = new Float32Array(nodeCount * 3);
+  nodeColorTargetArray = new Float32Array(nodeCount * 3);
+  nodeAlphaCurrentArray = new Float32Array(nodeCount);
+  nodeAlphaStartArray = new Float32Array(nodeCount);
+  nodeAlphaTargetArray = new Float32Array(nodeCount);
+  nodeScaleCurrentArray = new Float32Array(nodeCount);
+  nodeScaleStartArray = new Float32Array(nodeCount);
+  nodeScaleTargetArray = new Float32Array(nodeCount);
+  activeColorTransition = null;
+  activeScaleTransition = null;
+}
+
+function setNodeColorState(index, h, s, l, a = 1) {
+  const colorOffset = index * 3;
+  nodeColorCurrentArray[colorOffset] = h;
+  nodeColorCurrentArray[colorOffset + 1] = s;
+  nodeColorCurrentArray[colorOffset + 2] = l;
+  nodeColorStartArray[colorOffset] = h;
+  nodeColorStartArray[colorOffset + 1] = s;
+  nodeColorStartArray[colorOffset + 2] = l;
+  nodeColorTargetArray[colorOffset] = h;
+  nodeColorTargetArray[colorOffset + 1] = s;
+  nodeColorTargetArray[colorOffset + 2] = l;
+
+  nodeAlphaCurrentArray[index] = a;
+  nodeAlphaStartArray[index] = a;
+  nodeAlphaTargetArray[index] = a;
+}
+
+function setNodeScaleState(index, scale) {
+  nodeScaleCurrentArray[index] = scale;
+  nodeScaleStartArray[index] = scale;
+  nodeScaleTargetArray[index] = scale;
+}
+
+function applyNodeColorStateToMesh() {
+  if (!instancedMesh || !nodes || !nodeColorCurrentArray || !nodeAlphaCurrentArray) return;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const colorOffset = i * 3;
+    tempColor.setHSL(
+      nodeColorCurrentArray[colorOffset],
+      nodeColorCurrentArray[colorOffset + 1],
+      nodeColorCurrentArray[colorOffset + 2],
+    );
+    instancedMesh.setColorAt(i, tempColor);
+    if (nodeOpacityArray) {
+      nodeOpacityArray[i] = nodeAlphaCurrentArray[i];
+    }
+  }
+
+  if (instancedMesh.instanceColor) {
+    instancedMesh.instanceColor.needsUpdate = true;
+  }
+  if (instancedMesh.geometry.attributes.instanceOpacity) {
+    instancedMesh.geometry.attributes.instanceOpacity.needsUpdate = true;
+  }
+}
+
+function applyNodeTransformStateToMesh() {
+  if (!instancedMesh || !nodes) return;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const scale = nodeScaleCurrentArray
+      ? nodeScaleCurrentArray[i]
+      : n._currentScale;
+    dummy.position.set(n.x, n.y, n.z);
+    dummy.scale.setScalar(scale);
+    dummy.updateMatrix();
+    instancedMesh.setMatrixAt(i, dummy.matrix);
+  }
+
+  instancedMesh.instanceMatrix.needsUpdate = true;
+  instancedMesh.boundingSphere = null; // invalidate so raycaster recomputes after layout change
+}
+
+function hasMeaningfulDelta(currentValue, targetValue) {
+  return Math.abs(currentValue - targetValue) > TRANSITION_VALUE_EPSILON;
+}
+
+function beginColorTransition(now, durationMs = NODE_COLOR_TRANSITION_DURATION_MS) {
+  nodeColorStartArray.set(nodeColorCurrentArray);
+  nodeAlphaStartArray.set(nodeAlphaCurrentArray);
+  activeColorTransition = {
+    startTime: now,
+    durationMs: Math.max(1, durationMs),
+  };
+}
+
+function beginScaleTransition(now, durationMs = NODE_SCALE_TRANSITION_DURATION_MS) {
+  nodeScaleStartArray.set(nodeScaleCurrentArray);
+  activeScaleTransition = {
+    startTime: now,
+    durationMs: Math.max(1, durationMs),
+  };
+}
+
+function advanceVisualTransitions(now, options = {}) {
+  const {
+    applyColors = true,
+    applyTransforms = true,
+  } = options;
+
+  let didUpdateColors = false;
+  let didUpdateTransforms = false;
+
+  if (activeColorTransition && nodeColorCurrentArray && nodeAlphaCurrentArray) {
+    const elapsed = now - activeColorTransition.startTime;
+    const t = Math.min(Math.max(elapsed / activeColorTransition.durationMs, 0), 1);
+    const easedT = smootherStep(t);
+
+    for (let i = 0; i < nodeColorCurrentArray.length; i++) {
+      const startValue = nodeColorStartArray[i];
+      nodeColorCurrentArray[i] = startValue + (nodeColorTargetArray[i] - startValue) * easedT;
+    }
+    for (let i = 0; i < nodeAlphaCurrentArray.length; i++) {
+      const startValue = nodeAlphaStartArray[i];
+      nodeAlphaCurrentArray[i] = startValue + (nodeAlphaTargetArray[i] - startValue) * easedT;
+    }
+    didUpdateColors = true;
+
+    if (t >= 1 - TRANSITION_COMPLETE_EPSILON) {
+      nodeColorCurrentArray.set(nodeColorTargetArray);
+      nodeAlphaCurrentArray.set(nodeAlphaTargetArray);
+      activeColorTransition = null;
+    }
+  }
+
+  if (activeScaleTransition && nodeScaleCurrentArray) {
+    const elapsed = now - activeScaleTransition.startTime;
+    const t = Math.min(Math.max(elapsed / activeScaleTransition.durationMs, 0), 1);
+    const easedT = smootherStep(t);
+
+    for (let i = 0; i < nodeScaleCurrentArray.length; i++) {
+      const startValue = nodeScaleStartArray[i];
+      nodeScaleCurrentArray[i] = startValue + (nodeScaleTargetArray[i] - startValue) * easedT;
+    }
+    didUpdateTransforms = true;
+
+    if (t >= 1 - TRANSITION_COMPLETE_EPSILON) {
+      nodeScaleCurrentArray.set(nodeScaleTargetArray);
+      activeScaleTransition = null;
+    }
+  }
+
+  if (didUpdateColors && applyColors) {
+    applyNodeColorStateToMesh();
+  }
+  if (didUpdateTransforms && applyTransforms) {
+    applyNodeTransformStateToMesh();
+  }
 }
 
 function getTargetPixelRatio() {
@@ -262,6 +433,7 @@ export function createNodes(nodeArray) {
 
   nodeOpacityArray = new Float32Array(nodes.length);
   nodeOpacityArray.fill(1);
+  initializeNodeVisualState(nodes.length);
 
   const geometry = getNodeGeometryForCurrentMode();
   const material = new THREE.MeshBasicMaterial({
@@ -293,11 +465,16 @@ ${shader.fragmentShader}`.replace(
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const { h, s, l } = getCategoryColor(node.category);
+    const scale = Number.isFinite(node._currentScale)
+      ? node._currentScale
+      : node._baseScale;
     tempColor.setHSL(h, s, l);
     instancedMesh.setColorAt(i, tempColor);
+    setNodeColorState(i, h, s, l, 1);
+    setNodeScaleState(i, scale);
 
     dummy.position.set(node.x, node.y, node.z);
-    dummy.scale.setScalar(node._baseScale);
+    dummy.scale.setScalar(scale);
     dummy.updateMatrix();
     instancedMesh.setMatrixAt(i, dummy.matrix);
   }
@@ -595,48 +772,123 @@ function createEdgeDescriptor(si, ti) {
 
 // --- Position / visual updates ---
 
-export function updateNodeTransforms() {
+export function updateNodeTransforms(options = {}) {
   if (!instancedMesh || !nodes) return;
+
+  const now = performance.now();
+  advanceVisualTransitions(now, { applyColors: false, applyTransforms: false });
+
+  const animateScale = options.animateScale ?? true;
+  const transitionDuration = options.transitionDurationMs ?? NODE_SCALE_TRANSITION_DURATION_MS;
+  let hasScaleTargetChange = false;
 
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
-    dummy.position.set(n.x, n.y, n.z);
-    dummy.scale.setScalar(n._currentScale);
-    dummy.updateMatrix();
-    instancedMesh.setMatrixAt(i, dummy.matrix);
+    const targetScale = Number.isFinite(n._currentScale) ? n._currentScale : n._baseScale;
+
+    if (animateScale) {
+      if (hasMeaningfulDelta(nodeScaleTargetArray[i], targetScale)) {
+        nodeScaleTargetArray[i] = targetScale;
+        hasScaleTargetChange = true;
+      }
+    } else {
+      nodeScaleCurrentArray[i] = targetScale;
+      nodeScaleTargetArray[i] = targetScale;
+      nodeScaleStartArray[i] = targetScale;
+    }
   }
-  instancedMesh.instanceMatrix.needsUpdate = true;
-  instancedMesh.boundingSphere = null; // invalidate so raycaster recomputes after layout change
+
+  if (animateScale && hasScaleTargetChange) {
+    beginScaleTransition(now, transitionDuration);
+  } else if (!animateScale) {
+    activeScaleTransition = null;
+  }
+
+  applyNodeTransformStateToMesh();
 }
 
 export function updatePositions(options = {}) {
   const updateArrows = options.updateArrows ?? !animationPerformanceMode;
   const updateEdges = options.updateEdges ?? true;
-  updateNodeTransforms();
+  updateNodeTransforms({
+    animateScale: options.animateScale,
+    transitionDurationMs: options.transitionDurationMs,
+  });
 
   forEachEdgeLayer((layer) => {
     updateEdgeLayer(layer, { updateEdges, updateArrows });
   });
 }
 
-export function updateColors(colorMap) {
+export function updateColors(colorMap, options = {}) {
   if (!instancedMesh) return;
+  const now = performance.now();
+  advanceVisualTransitions(now, { applyColors: false, applyTransforms: false });
+
+  const animate = options.animate ?? true;
+  const transitionDuration = options.transitionDurationMs ?? NODE_COLOR_TRANSITION_DURATION_MS;
+  let hasColorTargetChange = false;
+
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const c = colorMap ? colorMap.get(node.id) : null;
     const alpha = c && typeof c.a === "number" ? c.a : 1;
+    let nextH = 0;
+    let nextS = 0;
+    let nextL = 0;
     if (c) {
-      tempColor.setHSL(c.h, c.s, c.l);
+      nextH = c.h;
+      nextS = c.s;
+      nextL = c.l;
     } else {
       const def = getCategoryColor(node.category);
-      tempColor.setHSL(def.h, def.s, def.l);
+      nextH = def.h;
+      nextS = def.s;
+      nextL = def.l;
     }
-    instancedMesh.setColorAt(i, tempColor);
-    if (nodeOpacityArray) nodeOpacityArray[i] = alpha;
+
+    const colorOffset = i * 3;
+    if (animate) {
+      if (hasMeaningfulDelta(nodeColorTargetArray[colorOffset], nextH)) {
+        nodeColorTargetArray[colorOffset] = nextH;
+        hasColorTargetChange = true;
+      }
+      if (hasMeaningfulDelta(nodeColorTargetArray[colorOffset + 1], nextS)) {
+        nodeColorTargetArray[colorOffset + 1] = nextS;
+        hasColorTargetChange = true;
+      }
+      if (hasMeaningfulDelta(nodeColorTargetArray[colorOffset + 2], nextL)) {
+        nodeColorTargetArray[colorOffset + 2] = nextL;
+        hasColorTargetChange = true;
+      }
+      if (hasMeaningfulDelta(nodeAlphaTargetArray[i], alpha)) {
+        nodeAlphaTargetArray[i] = alpha;
+        hasColorTargetChange = true;
+      }
+    } else {
+      nodeColorCurrentArray[colorOffset] = nextH;
+      nodeColorCurrentArray[colorOffset + 1] = nextS;
+      nodeColorCurrentArray[colorOffset + 2] = nextL;
+      nodeColorTargetArray[colorOffset] = nextH;
+      nodeColorTargetArray[colorOffset + 1] = nextS;
+      nodeColorTargetArray[colorOffset + 2] = nextL;
+      nodeColorStartArray[colorOffset] = nextH;
+      nodeColorStartArray[colorOffset + 1] = nextS;
+      nodeColorStartArray[colorOffset + 2] = nextL;
+      nodeAlphaCurrentArray[i] = alpha;
+      nodeAlphaTargetArray[i] = alpha;
+      nodeAlphaStartArray[i] = alpha;
+    }
   }
-  instancedMesh.instanceColor.needsUpdate = true;
-  if (instancedMesh.geometry.attributes.instanceOpacity) {
-    instancedMesh.geometry.attributes.instanceOpacity.needsUpdate = true;
+
+  if (animate && hasColorTargetChange) {
+    beginColorTransition(now, transitionDuration);
+  } else if (!animate) {
+    activeColorTransition = null;
+  }
+
+  if (!animate) {
+    applyNodeColorStateToMesh();
   }
 }
 
@@ -962,6 +1214,7 @@ export function setCameraState(nextState) {
 
 export function renderFrame({ updateControls = true } = {}) {
   if (!renderer || !camera) return;
+  advanceVisualTransitions(performance.now());
   if (controls && updateControls) {
     controls.update();
   }
