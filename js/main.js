@@ -1045,14 +1045,35 @@ function handleClick(nodeId, options = {}) {
   const node = graph.nodeMap.get(nodeId);
   if (!node) return;
 
-  const shouldAppend = appendToSelection && hasActiveSelection();
-  selectedNodeIds = shouldAppend
-    ? new Set([...selectedNodeIds, nodeId])
-    : new Set([nodeId]);
-  selectedNodeId = nodeId;
+  const shouldToggleSelection = appendToSelection && hasActiveSelection();
+  let focusNodeId = nodeId;
+
+  if (shouldToggleSelection) {
+    const nextSelectedNodeIds = new Set(selectedNodeIds);
+    if (nextSelectedNodeIds.has(nodeId)) {
+      nextSelectedNodeIds.delete(nodeId);
+      if (nextSelectedNodeIds.size === 0) {
+        handleEmptyClick();
+        return;
+      }
+
+      if (!selectedNodeId || !nextSelectedNodeIds.has(selectedNodeId)) {
+        selectedNodeId = getFirstSetValue(nextSelectedNodeIds);
+      }
+      focusNodeId = selectedNodeId;
+    } else {
+      nextSelectedNodeIds.add(nodeId);
+      selectedNodeId = nodeId;
+      focusNodeId = nodeId;
+    }
+    selectedNodeIds = nextSelectedNodeIds;
+  } else {
+    selectedNodeIds = new Set([nodeId]);
+    selectedNodeId = nodeId;
+  }
 
   if (updatePermalink) {
-    UI.updatePermalink(nodeId);
+    UI.updatePermalink(selectedNodeId);
   }
 
   UI.enableRadialLayout(true);
@@ -1062,8 +1083,8 @@ function handleClick(nodeId, options = {}) {
   const selectionContext = getSelectionContext(selectedNodeIds);
   selectedNodeIds = selectionContext.selectedNodeSet;
   applySelectionHighlight(selectionContext, {
-    animateCamera: shouldAppend ? false : animateCamera,
-    focusNodeId: nodeId,
+    animateCamera: shouldToggleSelection ? false : animateCamera,
+    focusNodeId,
   });
 }
 

@@ -415,7 +415,7 @@ export function showSelectionGroupPanel({
 
   renderMarkdown(
     document.getElementById("info-definition"),
-    `Shift-click adds nodes to this group. Click without Shift to start a new selection.`,
+    `Shift-click toggles nodes in this group. Click without Shift to start a new selection.`,
   );
   renderMarkdown(
     document.getElementById("info-long-description"),
