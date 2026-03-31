@@ -357,7 +357,7 @@ Optional:
 ## 7.5 Tooltip / Label Actions
 
 ### `openTooltip`
-Opens tooltip anchored to a node and sets tooltip opacity.
+Opens or updates a tooltip anchored to a node. Multiple node tooltips can be open at once.
 
 Required:
 
@@ -375,11 +375,14 @@ Aliases:
 - `openNodeTooltip` -> `openTooltip`
 
 ### `closeTooltip`
-Closes tooltip by fading opacity to zero.
+Closes a specific node tooltip by fading opacity to zero.
+
+Required:
+
+- `nodeId` (string)
 
 Optional:
 
-- `nodeId` (string): if provided, that node is considered current tooltip source during fade
 - `duration` (default `0`)
 - `at`
 
@@ -400,6 +403,14 @@ Optional:
 - `duration` (default `0`)
 - `at`
 
+### `closeAllTooltips`
+Closes all currently open tooltips by fading their opacity to zero.
+
+Optional:
+
+- `duration` (default `0`)
+- `at`
+
 ## 8. Action Name Summary
 
 Canonical actions:
@@ -417,6 +428,7 @@ Canonical actions:
 - `revealGraph`
 - `openTooltip`
 - `closeTooltip`
+- `closeAllTooltips`
 - `fadeLabel`
 - `orbit`
 - `autoRotate`
@@ -523,5 +535,5 @@ It demonstrates:
 
 - selection + context (`focusNode`)
 - camera motion (`moveCamera`, `autoRotate`, `cameraFocus`, `zoomTo`)
-- tooltip control (`openTooltip`, `fadeLabel`, `closeTooltip`)
+- tooltip control (`openTooltip`, `fadeLabel`, `closeTooltip`, `closeAllTooltips`)
 - visibility control (`hideGraph`, `revealGraph`, `fadeGraph`)

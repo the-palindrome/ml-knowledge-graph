@@ -227,6 +227,24 @@ export function setupNodeSizing(onChange) {
   bindSelectChange("node-sizing-select", onChange, { notifyInitial: true });
 }
 
+export function setupExplorerTooltipSize(onChange) {
+  bindSelectChange("explorer-tooltip-size-select", onChange, {
+    notifyInitial: true,
+  });
+}
+
+export function setupAnchorTooltipOnSelection(onChange) {
+  const checkbox = document.getElementById("anchor-tooltip-on-selection");
+  if (!checkbox) return;
+
+  const emitChange = () => {
+    onChange(Boolean(checkbox.checked));
+  };
+
+  checkbox.addEventListener("change", emitChange);
+  emitChange();
+}
+
 export function setupSettingsPanel() {
   const settingsButton = document.getElementById("settings-btn");
   const closeButton = document.getElementById("settings-close");

@@ -61,7 +61,7 @@ Supported script actions:
 - `highlightDescendants` (descendants up to `level`)
 - `highlightDependencies` (dependencies up to `level`)
 - `hideGraph` / `fadeGraph` / `revealGraph`
-- `openTooltip` / `closeTooltip` / `fadeLabel`
+- `openTooltip` / `closeTooltip` / `closeAllTooltips` / `fadeLabel`
 - `orbit` / `autoRotate`
 - `zoomTo`
 

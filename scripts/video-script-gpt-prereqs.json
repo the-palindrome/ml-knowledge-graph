@@ -169,7 +169,7 @@
   },
   {
     "at": 17.7,
-    "action": "closeTooltip",
+    "action": "closeAllTooltips",
     "duration": 0.3
   },
   {

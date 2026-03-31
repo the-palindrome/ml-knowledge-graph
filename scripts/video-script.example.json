@@ -58,7 +58,7 @@
   },
   {
     "at": 12.8,
-    "action": "closeTooltip",
+    "action": "closeAllTooltips",
     "duration": 0.4
   },
   {
