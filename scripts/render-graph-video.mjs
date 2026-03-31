@@ -243,6 +243,7 @@ function getFrameStateSignature(frameState) {
     selectedNodeIds: frameState.selectedNodeIds ?? [],
     tooltipNodeId: frameState.tooltipNodeId ?? null,
     tooltipOpacity: frameState.tooltipOpacity ?? null,
+    tooltipSize: frameState.tooltipSize ?? null,
     cameraState: frameState.cameraState ?? null,
   });
 }

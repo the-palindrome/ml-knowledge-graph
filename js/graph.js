@@ -4,13 +4,17 @@
 // Each unique category gets a distinct hue. We assign hues after loading
 // based on sorted category names for stable, well-spaced hues.
 
-let categoryHueMap = new Map();   // category → hue (0-360)
+let categoryColorMap = new Map(); // category → { h, s, l } (all normalized 0-1)
 let sortedCategories = [];        // categories sorted alphabetically
+const CATEGORY_HUE_OFFSET_DEGREES = 14;
+const CATEGORY_SATURATION_STEPS = [0.84, 0.9, 0.87, 0.92];
+const CATEGORY_LIGHTNESS_STEPS = [0.6, 0.56, 0.64, 0.58, 0.62];
+const DEFAULT_CATEGORY_COLOR = { h: 0.54, s: 0.78, l: 0.58 };
 
 export function getCategoryColor(category) {
-  const hue = categoryHueMap.get(category);
-  if (hue !== undefined) return { h: hue / 360, s: 0.7, l: 0.6 };
-  return { h: 0.5, s: 0.3, l: 0.5 }; // fallback for unknown
+  const color = categoryColorMap.get(category);
+  if (color) return color;
+  return DEFAULT_CATEGORY_COLOR; // fallback for unknown
 }
 
 export function getCategoryColorHex(category) {
@@ -144,10 +148,17 @@ function buildCategoryColorMap(nodes) {
   }
 
   sortedCategories = [...categorySet].sort();
-  categoryHueMap = new Map();
+  categoryColorMap = new Map();
   const count = sortedCategories.length || 1;
   sortedCategories.forEach((cat, i) => {
-    categoryHueMap.set(cat, (i * 360 / count) % 360);
+    const hueDegrees = ((i * 360 / count) + CATEGORY_HUE_OFFSET_DEGREES) % 360;
+    const saturation = CATEGORY_SATURATION_STEPS[i % CATEGORY_SATURATION_STEPS.length];
+    const lightness = CATEGORY_LIGHTNESS_STEPS[i % CATEGORY_LIGHTNESS_STEPS.length];
+    categoryColorMap.set(cat, {
+      h: hueDegrees / 360,
+      s: saturation,
+      l: lightness,
+    });
   });
 }
 

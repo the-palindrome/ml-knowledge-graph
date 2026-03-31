@@ -7,7 +7,7 @@
 
 body {
   overflow: hidden;
-  background: #0a0a0f;
+  background: #271828;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: #e0e0e0;
 }
@@ -26,6 +26,7 @@ body {
 #tooltip {
   --tip-label-x: 42px;
   --tip-label-y: 16px;
+  --tip-size-scale: 1;
   position: fixed;
   pointer-events: none;
   left: 0;
@@ -36,7 +37,7 @@ body {
   padding-right: 8px;
   padding-bottom: 10px;
   color: #f2f3f5;
-  font-size: clamp(24px, 1.65vw, 36px);
+  font-size: calc(clamp(24px, 1.65vw, 36px) * var(--tip-size-scale));
   font-family: "Cormorant Garamond", "Garamond", "Times New Roman", serif;
   font-weight: 400;
   letter-spacing: 0.01em;

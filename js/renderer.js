@@ -203,8 +203,8 @@ export function initRenderer(containerEl) {
   container = containerEl;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x040506);
-  scene.fog = new THREE.FogExp2(0x040506, 0.00023);
+  scene.background = new THREE.Color(0x271828);
+  scene.fog = new THREE.FogExp2(0x271828, 0.00023);
 
   camera = new THREE.PerspectiveCamera(
     60,
