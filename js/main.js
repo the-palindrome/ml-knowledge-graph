@@ -846,15 +846,6 @@ function handleHover(nodeId, screenX, screenY) {
     return;
   }
 
-  // Restore previous hover
-  if (hoveredNodeId && !hasActiveSelection()) {
-    const prev = graph.nodeMap.get(hoveredNodeId);
-    if (prev) {
-      prev._currentScale = prev._hoverRestoreScale ?? prev._baseScale;
-      prev._hoverRestoreScale = null;
-    }
-  }
-
   hoveredNodeId = nodeId;
 
   if (nodeId) {
@@ -872,18 +863,9 @@ function handleHover(nodeId, screenX, screenY) {
       hideTooltipRef(primaryTooltipRef);
     }
 
-    if (!hasActiveSelection() && node) {
-      node._hoverRestoreScale = node._currentScale;
-      node._currentScale = node._currentScale * 1.35;
-      Renderer.updatePositions({ updateEdges: false, updateArrows: false });
-    }
-
     container.style.cursor = 'pointer';
   } else {
     hideTooltipRef(primaryTooltipRef);
-    if (!hasActiveSelection()) {
-      Renderer.updatePositions({ updateEdges: false, updateArrows: false });
-    }
     container.style.cursor = 'default';
   }
 }
@@ -1232,12 +1214,10 @@ function applySearchState(query, animateSingleMatchCamera) {
     const baseColor = getNodeBaseColor(n);
     if (matchIds.has(n.id)) {
       colorMap.set(n.id, { ...baseColor, a: 1 });
-      n._currentScale = n._baseScale * 1.14;
     } else {
       colorMap.set(n.id, { ...baseColor, a: SEARCH_NON_MATCH_OPACITY });
-      n._currentScale = n._baseScale * 0.82;
     }
-    n._hoverRestoreScale = null;
+    n._currentScale = n._baseScale;
   }
 
   Renderer.updateColors(colorMap);
@@ -1278,7 +1258,6 @@ function applyBaseGraphStyle({
     const baseColor = getNodeBaseColor(n);
     colorMap.set(n.id, { ...baseColor, a: nodeOpacity });
     n._currentScale = n._baseScale;
-    n._hoverRestoreScale = null;
   }
   Renderer.updateColors(colorMap);
   if (updateNodePositions) {
@@ -1331,14 +1310,7 @@ function applySelectionHighlight(selectionContext, options = {}) {
       a: isActive ? 1 : NON_FOCUS_NODE_OPACITY,
     });
 
-    if (isSelected) {
-      n._currentScale = n._baseScale * 1.18;
-    } else if (isActive) {
-      n._currentScale = n._baseScale * 1.04;
-    } else {
-      n._currentScale = n._baseScale * 0.82;
-    }
-    n._hoverRestoreScale = null;
+    n._currentScale = n._baseScale;
   }
 
   const edgeGroups = [];
