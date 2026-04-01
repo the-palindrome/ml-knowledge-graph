@@ -32,7 +32,6 @@ Options:
   --width            Viewport width (default: 1920)
   --height           Viewport height (default: 1080)
   --url              Use an already-running graph URL (skip local static server)
-  --fast-path        Try in-browser MediaRecorder first (experimental)
   --frames-dir       Directory for intermediate PNG frames
   --keep-frames      Keep PNG frames after ffmpeg completes
   --verbose, -v      Enable verbose diagnostics
@@ -47,7 +46,6 @@ function parseArgs(argv) {
     width: DEFAULT_WIDTH,
     height: DEFAULT_HEIGHT,
     url: null,
-    fastPath: false,
     scriptPath: null,
     framesDir: null,
     keepFrames: false,
@@ -88,9 +86,6 @@ function parseArgs(argv) {
       case '--url':
         parsed.url = next;
         i += 1;
-        break;
-      case '--fast-path':
-        parsed.fastPath = true;
         break;
       case '--frames-dir':
         parsed.framesDir = path.resolve(next);
@@ -177,38 +172,6 @@ function decodeDataUrl(dataUrl) {
     mimeType: match[1],
     buffer: Buffer.from(match[2], 'base64'),
   };
-}
-
-function parseDurationFromFfmpegOutput(output) {
-  const match = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(output);
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const seconds = Number(match[3]);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) {
-    return null;
-  }
-  return (hours * 3600) + (minutes * 60) + seconds;
-}
-
-async function probeVideoDurationSeconds(ffmpegPath, filePath) {
-  return new Promise((resolve) => {
-    const child = spawn(ffmpegPath, ['-hide_banner', '-i', filePath], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      cwd: process.cwd(),
-      env: process.env,
-    });
-
-    let output = '';
-    const appendChunk = (chunk) => {
-      if (!chunk) return;
-      output += String(chunk);
-    };
-    child.stdout?.on('data', appendChunk);
-    child.stderr?.on('data', appendChunk);
-    child.once('error', () => resolve(null));
-    child.once('close', () => resolve(parseDurationFromFfmpegOutput(output)));
-  });
 }
 
 function createTimingStats() {
@@ -626,93 +589,6 @@ async function captureFrameAsPngBuffer(client, clip) {
   return Buffer.from(data, 'base64');
 }
 
-async function tryFastRecord(page, { fps, duration }, timingStats, logger) {
-  logger.info('Trying in-browser MediaRecorder fast path...');
-  const recordStart = performance.now();
-
-  const browserRecording = await page.evaluate(async ({ fps, duration: timelineDuration }) => {
-    const canvas = document.querySelector('#canvas-container canvas') ?? document.querySelector('canvas');
-    if (!canvas || typeof canvas.captureStream !== 'function') {
-      throw new Error('Canvas captureStream() is unavailable.');
-    }
-    if (typeof MediaRecorder !== 'function') {
-      throw new Error('MediaRecorder is unavailable.');
-    }
-
-    const preferredMimeTypes = [
-      'video/webm;codecs=vp9',
-      'video/webm;codecs=vp8',
-      'video/webm',
-    ];
-    const mimeType = preferredMimeTypes.find((candidate) => {
-      return typeof MediaRecorder.isTypeSupported !== 'function'
-        || MediaRecorder.isTypeSupported(candidate);
-    }) ?? '';
-
-    const frameTotal = Math.max(1, Math.floor((timelineDuration * fps) + 1));
-    const stream = canvas.captureStream(0);
-    const [videoTrack] = stream.getVideoTracks();
-
-    const recorder = new MediaRecorder(
-      stream,
-      mimeType ? { mimeType, videoBitsPerSecond: 12_000_000 } : { videoBitsPerSecond: 12_000_000 },
-    );
-    const chunks = [];
-    let totalSeekMs = 0;
-
-    recorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) {
-        chunks.push(event.data);
-      }
-    };
-
-    const stopPromise = new Promise((resolve, reject) => {
-      recorder.onstop = resolve;
-      recorder.onerror = () => {
-        reject(recorder.error ?? new Error('MediaRecorder failed.'));
-      };
-    });
-
-    recorder.start(250);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    for (let frameIndex = 0; frameIndex < frameTotal; frameIndex += 1) {
-      const seekStart = performance.now();
-      await window.graphVideo.seek(frameIndex / fps);
-      totalSeekMs += performance.now() - seekStart;
-      if (videoTrack && typeof videoTrack.requestFrame === 'function') {
-        videoTrack.requestFrame();
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000 / fps));
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, Math.max(500, 1000 / fps)));
-    recorder.stop();
-    await stopPromise;
-    stream.getTracks().forEach((track) => track.stop());
-
-    const resolvedMimeType = recorder.mimeType || mimeType || 'video/webm';
-    const blob = new Blob(chunks, { type: resolvedMimeType });
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let binary = '';
-    const binaryChunkSize = 0x8000;
-    for (let i = 0; i < bytes.length; i += binaryChunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + binaryChunkSize));
-    }
-
-    return {
-      dataUrl: `data:${resolvedMimeType};base64,${btoa(binary)}`,
-      frameCount: frameTotal,
-      totalSeekMs,
-    };
-  }, { fps, duration });
-
-  timingStats.frameCaptureMs = performance.now() - recordStart;
-  timingStats.frameSeekMs = Number(browserRecording.totalSeekMs) || 0;
-  timingStats.frameCount = Number(browserRecording.frameCount) || 0;
-  return browserRecording;
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const logger = makeLogger(args.verbose);
@@ -821,88 +697,20 @@ async function main() {
       }, scriptPayload);
     };
 
-    let runSummary = await initializeRenderPage();
+    const runSummary = await initializeRenderPage();
 
-    let duration = Number(
+    const duration = Number(
       runSummary?.duration ?? (await page.evaluate(() => window.graphVideo.getDuration())),
     );
     if (!Number.isFinite(duration) || duration < 0) {
       throw new Error('Invalid timeline duration returned by graphVideo API.');
     }
 
-    let frameCount = Math.max(1, Math.floor((duration * args.fps) + 1));
+    const frameCount = Math.max(1, Math.floor((duration * args.fps) + 1));
     logger.info(`Duration: ${duration.toFixed(3)}s`);
     logger.info(`Rendering ${frameCount} frame(s) at ${args.fps} fps...`);
-
-    if (!frameRoot && args.fastPath) {
-      let fastRecordingPath = null;
-      try {
-        const browserRecording = await tryFastRecord(
-          page,
-          { fps: args.fps, duration },
-          timingStats,
-          logger,
-        );
-        const fastRecording = decodeDataUrl(browserRecording.dataUrl);
-        const recordingExt = fastRecording.mimeType.includes('webm')
-          ? 'webm'
-          : (fastRecording.mimeType.includes('mp4') ? 'mp4' : 'bin');
-        fastRecordingPath = path.resolve(
-          projectRoot,
-          'tmp',
-          `graph-video-fast-capture-${Date.now()}.${recordingExt}`,
-        );
-        await fs.writeFile(fastRecordingPath, fastRecording.buffer);
-
-        logger.info('Fast path capture complete. Transcoding to MP4...');
-        const ffmpegFinalizeStart = performance.now();
-        await runCommand(ffmpegPath, [
-          '-y',
-          '-hide_banner',
-          '-loglevel', 'warning',
-          '-i', fastRecordingPath,
-          '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
-          '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-pix_fmt', 'yuv420p',
-          '-movflags', '+faststart',
-          args.output,
-        ], { stdio: 'inherit' });
-        timingStats.ffmpegFinalizeMs = performance.now() - ffmpegFinalizeStart;
-
-        const renderedDuration = await probeVideoDurationSeconds(ffmpegPath, args.output);
-        const minExpectedDuration = duration > 1 ? duration - (1 / args.fps) : duration * 0.9;
-        if (!Number.isFinite(renderedDuration) || renderedDuration < minExpectedDuration) {
-          throw new Error(
-            `Fast path output duration ${renderedDuration ?? 'unknown'}s `
-            + `is shorter than expected ${duration.toFixed(3)}s.`,
-          );
-        }
-
-        logger.info(`Video written to ${args.output}`);
-        logTimingSummary(logger, timingStats);
-        await fs.rm(fastRecordingPath, { force: true });
-        return;
-      } catch (fastPathError) {
-        if (fastRecordingPath) {
-          await fs.rm(fastRecordingPath, { force: true }).catch(() => {});
-        }
-        logger.warn(`Fast path failed; falling back to PNG frame capture: ${formatError(fastPathError)}`);
-        logger.info('Reinitializing page for deterministic fallback...');
-        runSummary = await initializeRenderPage();
-        duration = Number(
-          runSummary?.duration ?? (await page.evaluate(() => window.graphVideo.getDuration())),
-        );
-        if (!Number.isFinite(duration) || duration < 0) {
-          throw new Error('Invalid timeline duration returned during fallback initialization.');
-        }
-        frameCount = Math.max(1, Math.floor((duration * args.fps) + 1));
-        logger.info(`Fallback mode: rendering ${frameCount} frame(s) at ${args.fps} fps...`);
-      }
-    }
-
-    if (!frameRoot && !args.fastPath) {
-      logger.info('Fast path disabled; using deterministic PNG capture.');
+    if (!frameRoot) {
+      logger.info('Using deterministic PNG capture.');
     }
 
     if (!frameRoot) {
