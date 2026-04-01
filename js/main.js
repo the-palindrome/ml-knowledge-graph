@@ -1666,7 +1666,7 @@ function integrateSmoothStep01(value) {
   return (t * t * t) - (0.5 * t * t * t * t);
 }
 
-function applyAutoRotateRampProgress(progress, duration, windUpDuration, windDownDuration) {
+function applyVideoWindProfileProgress(progress, duration, windUpDuration, windDownDuration) {
   const t = clamp01(progress);
   const totalDuration = Math.max(toFiniteNumber(duration, 0), VIDEO_DURATION_EPSILON);
   let windUp = clampNonNegative(windUpDuration, 0);
@@ -1927,7 +1927,7 @@ function normalizeVideoTooltipSize(rawSize, actionName, index) {
   return size;
 }
 
-function normalizeVideoAutoRotateWindDuration(value, fieldName, actionName, index) {
+function normalizeVideoWindDuration(value, fieldName, actionName, index) {
   if (value == null) return null;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -2002,13 +2002,13 @@ function normalizeVideoAction(rawAction, index) {
     const defaultSpeed = actionName === 'autoRotate' ? VIDEO_DEFAULT_AUTO_ROTATE_SPEED : 0;
     normalized.speed = toFiniteNumber(rawAction.speed, defaultSpeed);
     if (actionName === 'autoRotate') {
-      normalized.windUp = normalizeVideoAutoRotateWindDuration(
+      normalized.windUp = normalizeVideoWindDuration(
         rawAction.windUp,
         'windUp',
         declaredActionName,
         index,
       ) ?? 0;
-      normalized.windDown = normalizeVideoAutoRotateWindDuration(
+      normalized.windDown = normalizeVideoWindDuration(
         rawAction.windDown,
         'windDown',
         declaredActionName,
@@ -2068,6 +2068,18 @@ function normalizeVideoAction(rawAction, index) {
 
     normalized._cameraFocusNodeId = focusNodeId;
     normalized._cameraFocusTarget = focusTarget;
+    normalized.windUp = normalizeVideoWindDuration(
+      rawAction.windUp,
+      'windUp',
+      declaredActionName,
+      index,
+    ) ?? (normalized.duration * 0.2);
+    normalized.windDown = normalizeVideoWindDuration(
+      rawAction.windDown,
+      'windDown',
+      declaredActionName,
+      index,
+    ) ?? (normalized.duration * 0.2);
 
     if (rawAction.distance != null) {
       const distance = Number(rawAction.distance);
@@ -2393,11 +2405,11 @@ function applyVideoCategoryHighlightState(state, action) {
   state.selectedNodeIds = categoryNodeSet;
   state.focusNodeId = getFirstSetValue(categoryNodeSet);
   state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
-  state.showPrerequisites = false;
+  state.showPrerequisites = true;
   state.showDependents = false;
   state.contextOverride = {
     selectedNodeSet: categoryNodeSet,
-    prerequisiteSet: new Set(),
+    prerequisiteSet: new Set(categoryNodeSet),
     dependentSet: new Set(),
   };
 }
@@ -2632,9 +2644,9 @@ function applyVideoActionAtTime(state, action, timelineTime) {
   const cameraProgress = isCameraTimelineAction(action.action)
     ? easeVideoProgress(progress, action.easing)
     : progress;
-  const shouldApplyAutoRotateWindProfile = action.action === 'autoRotate';
-  const rotationProgress = shouldApplyAutoRotateWindProfile
-    ? applyAutoRotateRampProgress(cameraProgress, action.duration, action.windUp, action.windDown)
+  const shouldApplyWindProfile = action.action === 'autoRotate' || action.action === 'cameraFocus';
+  const rotationProgress = shouldApplyWindProfile
+    ? applyVideoWindProfileProgress(cameraProgress, action.duration, action.windUp, action.windDown)
     : cameraProgress;
   const effectiveElapsed = hasDuration ? action.duration * rotationProgress : 0;
 

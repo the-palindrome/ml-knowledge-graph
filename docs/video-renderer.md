@@ -238,6 +238,8 @@ Optional:
 
 - `distance` (number > 0)
 - `duration` (default `1.2`)
+- `windUp` (number in seconds, default `0.2 * duration`)
+- `windDown` (number in seconds, default `0.2 * duration`)
 - `easing` (default `smooth`)
 - `at`
 
@@ -404,6 +406,7 @@ Optional:
 
 ### `highlightCategory`
 Highlights all nodes in a category using the same contextual fade treatment as multi-node selection.
+Edges whose endpoints are both inside the category are highlighted as well.
 
 Required:
 
