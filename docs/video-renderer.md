@@ -606,6 +606,7 @@ node scripts/render-graph-video.mjs --script ./scripts/video-script.example.json
   - `--no-sandbox`
   - `--disable-setuid-sandbox`
 - Navigates using `domcontentloaded` and waits for `window.graphVideo`
+- Prints a continuously-updated render status line with current measured FPS, average FPS, and ETA
 - Captures one PNG per frame as `frame-000000.png`, `frame-000001.png`, ...
 - Encodes with ffmpeg (`libx264`, `yuv420p`, `+faststart`)
 

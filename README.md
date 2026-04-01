@@ -114,9 +114,15 @@ Node references can use:
 1. Install prerequisites:
 
 ```bash
-npm install --save-dev puppeteer
-# ffmpeg must also be installed and available in PATH
+npm ci
+# Outside the devcontainer, install ffmpeg or rely on the ffmpeg-static fallback.
 ```
+
+If you open the repo in the devcontainer, the full renderer toolchain is installed automatically:
+
+- local Node dependencies via `npm ci`
+- system `ffmpeg`
+- system `chromium` plus the shared libraries Puppeteer needs
 
 2. Run the renderer:
 

@@ -15,10 +15,6 @@ node_modules/
 .yarn/build-state.yml
 .yarn/install-state.gz
 
-# Package manifests (requested)
-package.json
-package-lock.json
-
 # Build outputs / artifacts
 dist/
 build/

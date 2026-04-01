@@ -235,6 +235,64 @@ function logTimingSummary(logger, stats) {
   );
 }
 
+function createRenderFpsReporter({ logger, frameCount, targetFps }) {
+  const startMs = performance.now();
+  const useSingleLineUpdates = process.stdout.isTTY;
+  let lastSampleMs = startMs;
+  let lastSampleFrame = 0;
+  let smoothedFps = 0;
+  let previousLineLength = 0;
+  let lastRenderedStatusFrame = -1;
+
+  const renderStatus = (renderedFrames) => {
+    const clampedRenderedFrames = Math.max(0, Math.min(frameCount, renderedFrames));
+    const now = performance.now();
+    const elapsedSec = Math.max((now - startMs) / 1000, Number.EPSILON);
+    const sampleElapsedSec = Math.max((now - lastSampleMs) / 1000, Number.EPSILON);
+    const sampleFrames = clampedRenderedFrames - lastSampleFrame;
+    if (sampleFrames > 0) {
+      const sampleFps = sampleFrames / sampleElapsedSec;
+      smoothedFps = smoothedFps === 0 ? sampleFps : ((smoothedFps * 0.8) + (sampleFps * 0.2));
+      lastSampleFrame = clampedRenderedFrames;
+      lastSampleMs = now;
+    }
+
+    const averageFps = clampedRenderedFrames / elapsedSec;
+    const progressPct = frameCount > 0 ? (clampedRenderedFrames / frameCount) * 100 : 100;
+    const remainingFrames = Math.max(0, frameCount - clampedRenderedFrames);
+    const etaSec = averageFps > 0 ? (remainingFrames / averageFps) : Infinity;
+    const etaLabel = Number.isFinite(etaSec) ? `${etaSec.toFixed(1)}s` : '--';
+    const statusLine = `frame ${clampedRenderedFrames}/${frameCount} (${progressPct.toFixed(1)}%)`
+      + ` | render fps ${smoothedFps.toFixed(2)}`
+      + ` | avg ${averageFps.toFixed(2)}`
+      + ` | target ${targetFps}`
+      + ` | eta ${etaLabel}`;
+
+    if (useSingleLineUpdates) {
+      const paddedLine = statusLine.padEnd(previousLineLength, ' ');
+      process.stdout.write(`\r${paddedLine}`);
+      previousLineLength = Math.max(previousLineLength, statusLine.length);
+    } else {
+      logger.info(statusLine);
+    }
+    lastRenderedStatusFrame = clampedRenderedFrames;
+  };
+
+  return {
+    tick(renderedFrames) {
+      renderStatus(renderedFrames);
+    },
+    finish(renderedFrames = frameCount) {
+      if (renderedFrames !== lastRenderedStatusFrame) {
+        renderStatus(renderedFrames);
+      }
+      if (useSingleLineUpdates) {
+        process.stdout.write('\n');
+      }
+    },
+  };
+}
+
 function getFrameStateSignature(frameState) {
   if (!frameState) return null;
   return JSON.stringify({
@@ -851,7 +909,11 @@ async function main() {
       ffmpegEncoder = startFfmpegEncoder(ffmpegPath, args);
     }
 
-    const progressInterval = Math.max(1, Math.floor(frameCount / 100));
+    const fpsReporter = createRenderFpsReporter({
+      logger,
+      frameCount,
+      targetFps: args.fps,
+    });
 
     for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
       const t = frameIndex / args.fps;
@@ -897,13 +959,9 @@ async function main() {
       }
       timingStats.frameOutputMs += performance.now() - outputStart;
       timingStats.frameCount += 1;
-
-      if (frameIndex === 0
-        || frameIndex === frameCount - 1
-        || (frameIndex + 1) % progressInterval === 0) {
-        logger.info(`frame ${frameIndex + 1}/${frameCount}`);
-      }
+      fpsReporter.tick(frameIndex + 1);
     }
+    fpsReporter.finish(timingStats.frameCount);
 
     if (ffmpegEncoder) {
       logger.info('Finalizing ffmpeg output...');
