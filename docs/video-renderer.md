@@ -116,7 +116,7 @@ A timeline script payload is an object:
   - negative values are clamped to `0`
 - `action` (string): action name (canonical or alias)
 - `duration` (number):
-  - non-camera actions default to `0`
+  - non-camera actions default to `0`, unless an action explicitly requires `duration`
   - camera actions default to smooth non-zero durations
   - camera actions require `duration > 0`
 
@@ -132,6 +132,10 @@ Camera actions are:
 - `orbit`
 - `autoRotate`
 - `zoomTo`
+
+## Layout overlap rule
+
+`changeLayout` actions may **not overlap in time**. If a layout action starts before the previous layout action ends, validation fails.
 
 ## 4. Node Reference Resolution
 
@@ -315,6 +319,26 @@ Optional:
 - `easing` (default `smooth`)
 - `at`
 
+### `changeLayout`
+Transitions node positions to a named graph layout.
+
+Required:
+
+- `layout` (`"force" | "hierarchical" | "cluster" | "radial"`)
+- `duration` (number >= `0`): transition length in seconds
+
+Optional:
+
+- `easing` (default `smooth`)
+- `at`
+- `centerNodeId` (string): required when `layout` is `"radial"`
+- `nodeId` / `focusNodeId` / `targetNodeId` (string): accepted aliases for `centerNodeId`
+
+Notes:
+
+- `duration: 0` applies the layout immediately.
+- Layout target positions are computed once when the script is loaded, then reused deterministically during seeking/rendering.
+
 ## 7.3 Graph Visibility Actions
 
 ### `hideGraph`
@@ -376,6 +400,24 @@ Required:
 Optional:
 
 - selection options from `selectNode` (e.g., `append`, `appendToSelection`)
+- `at`, `duration`
+
+### `highlightCategory`
+Highlights all nodes in a category using the same contextual fade treatment as multi-node selection.
+
+Required:
+
+- `category` (string)
+
+Category resolution:
+
+1. exact category name
+2. case-insensitive full category name
+3. slugified category name
+4. unique case-insensitive substring match
+
+Optional:
+
 - `at`, `duration`
 
 ### `highlightDepthGroupNodes`
@@ -493,9 +535,11 @@ Canonical actions:
 - `focusNode`
 - `cameraFocus`
 - `moveCamera`
+- `changeLayout`
 - `highlightNeighbors`
 - `highlightDescendants`
 - `highlightDependencies`
+- `highlightCategory`
 - `highlightDepthGroupNodes`
 - `highlightDepthEdges`
 - `highlightLowerSlice`
@@ -593,6 +637,7 @@ Common script validation failures:
 - invalid `axis`
 - missing required arguments for action
 - overlapping camera actions in timeline
+- overlapping layout actions in timeline
 
 Renderer runtime failures:
 

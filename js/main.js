@@ -97,6 +97,12 @@ const VIDEO_CAMERA_EASING_MODES = new Set([
   'ease-out',
   'ease-in-out',
 ]);
+const VIDEO_LAYOUT_OPTIONS = new Set([
+  'force',
+  'hierarchical',
+  'cluster',
+  'radial',
+]);
 const VIDEO_GRAPH_VISIBILITY = {
   CONTEXT: 'context',
   REVEALED: 'revealed',
@@ -114,9 +120,11 @@ const VIDEO_SUPPORTED_ACTIONS = new Set([
   'moveCamera',
   'cameraMove',
   'move',
+  'changeLayout',
   'highlightNeighbors',
   'highlightDescendants',
   'highlightDependencies',
+  'highlightCategory',
   'highlightDepthGroupNodes',
   'highlightDepthEdges',
   'highlightLowerSlice',
@@ -168,9 +176,11 @@ const VIDEO_SCENE_STATE_ACTIONS = new Set([
   'selectNode',
   'unselectNode',
   'focusNode',
+  'changeLayout',
   'highlightNeighbors',
   'highlightDescendants',
   'highlightDependencies',
+  'highlightCategory',
   'highlightDepthGroupNodes',
   'highlightDepthEdges',
   'highlightLowerSlice',
@@ -197,12 +207,15 @@ const videoTimelineState = {
   actions: [],
   duration: 0,
   baseCameraState: null,
+  baseNodePositions: null,
+  baseLayout: 'force',
   cameraEnd: null,
   active: false,
   currentTime: 0,
   appliedSceneVersion: null,
 };
 let videoNodeLookupMap = null;
+let videoCategoryLookupMap = null;
 
 window.addEventListener('resize', () => {
   syncActiveExplorerTooltips();
@@ -292,6 +305,36 @@ function applyPositions(positions) {
     const pos = positions.get(node.id);
     if (pos) { node.x = pos.x; node.y = pos.y; node.z = pos.z; }
   }
+}
+
+function captureCurrentGraphPositions() {
+  const positions = new Map();
+  if (!graph?.nodes) return positions;
+
+  for (const node of graph.nodes) {
+    positions.set(node.id, {
+      x: Number.isFinite(node.x) ? node.x : 0,
+      y: Number.isFinite(node.y) ? node.y : 0,
+      z: Number.isFinite(node.z) ? node.z : 0,
+    });
+  }
+
+  return positions;
+}
+
+function clonePositionMap(positions) {
+  const cloned = new Map();
+  if (!(positions instanceof Map)) return cloned;
+
+  for (const [nodeId, pos] of positions.entries()) {
+    cloned.set(nodeId, {
+      x: Number.isFinite(pos?.x) ? pos.x : 0,
+      y: Number.isFinite(pos?.y) ? pos.y : 0,
+      z: Number.isFinite(pos?.z) ? pos.z : 0,
+    });
+  }
+
+  return cloned;
 }
 
 function getFirstSetValue(set) {
@@ -1557,7 +1600,14 @@ function getVideoCameraDefaultDuration(actionName) {
   return VIDEO_DEFAULT_CAMERA_DURATION;
 }
 
-function normalizeVideoCameraEasing(rawEasing, actionName, index) {
+function getVideoDefaultDuration(actionName) {
+  if (isCameraTimelineAction(actionName)) {
+    return getVideoCameraDefaultDuration(actionName);
+  }
+  return 0;
+}
+
+function normalizeVideoEasing(rawEasing, actionName, index) {
   if (rawEasing == null) return 'smooth';
   const easing = String(rawEasing).trim().toLowerCase();
   if (!VIDEO_CAMERA_EASING_MODES.has(easing)) {
@@ -1566,6 +1616,31 @@ function normalizeVideoCameraEasing(rawEasing, actionName, index) {
     );
   }
   return easing;
+}
+
+function normalizeVideoLayoutName(rawLayout, actionName, index) {
+  const layout = String(rawLayout ?? '').trim().toLowerCase();
+  if (!VIDEO_LAYOUT_OPTIONS.has(layout)) {
+    throw new Error(
+      `Action "${actionName}" at index ${index} has invalid layout "${rawLayout}".`,
+    );
+  }
+  return layout;
+}
+
+function computeVideoLayoutPositions(layout, options = {}) {
+  switch (layout) {
+    case 'force':
+      return computeForceLayout(graph.nodes, graph.edges);
+    case 'hierarchical':
+      return computeHierarchicalLayout(graph.nodes);
+    case 'cluster':
+      return computeClusterLayout(graph.nodes);
+    case 'radial':
+      return computeRadialLayout(graph.nodes, options.centerNodeId, graph.nodeMap);
+    default:
+      return null;
+  }
 }
 
 function easeVideoProgress(progress, easing) {
@@ -1663,6 +1738,28 @@ function buildVideoNodeLookupMap() {
   return videoNodeLookupMap;
 }
 
+function buildVideoCategoryLookupMap() {
+  if (videoCategoryLookupMap) return videoCategoryLookupMap;
+  videoCategoryLookupMap = new Map();
+
+  for (const node of graph.nodes) {
+    const category = String(node.category ?? '').trim();
+    if (!category) continue;
+
+    const lowerKey = category.toLowerCase();
+    if (!videoCategoryLookupMap.has(lowerKey)) {
+      videoCategoryLookupMap.set(lowerKey, category);
+    }
+
+    const slugKey = toVideoNodeSlug(category);
+    if (slugKey && !videoCategoryLookupMap.has(slugKey)) {
+      videoCategoryLookupMap.set(slugKey, category);
+    }
+  }
+
+  return videoCategoryLookupMap;
+}
+
 function resolveVideoNodeId(nodeRef) {
   if (typeof nodeRef !== 'string' || nodeRef.trim().length === 0) return null;
   const trimmed = nodeRef.trim();
@@ -1695,6 +1792,30 @@ function resolveVideoReferencedNode({
     );
   }
   return resolved;
+}
+
+function resolveVideoCategoryName(categoryRef) {
+  if (typeof categoryRef !== 'string' || categoryRef.trim().length === 0) return null;
+
+  const trimmed = categoryRef.trim();
+  const lookup = buildVideoCategoryLookupMap();
+  const lowerKey = trimmed.toLowerCase();
+  const directMatch = lookup.get(lowerKey);
+  if (directMatch) return directMatch;
+
+  const slugMatch = lookup.get(toVideoNodeSlug(trimmed));
+  if (slugMatch) return slugMatch;
+
+  const substringMatches = new Set();
+  for (const category of lookup.values()) {
+    if (category.toLowerCase().includes(lowerKey)) {
+      substringMatches.add(category);
+    }
+  }
+
+  return substringMatches.size === 1
+    ? substringMatches.values().next().value
+    : null;
 }
 
 function canonicalVideoActionName(actionName) {
@@ -1830,7 +1951,7 @@ function normalizeVideoAction(rawAction, index) {
 
   const isCameraAction = isCameraTimelineAction(actionName);
   const hasExplicitDuration = rawAction.duration != null;
-  let duration = isCameraAction ? getVideoCameraDefaultDuration(actionName) : 0;
+  let duration = getVideoDefaultDuration(actionName);
   if (hasExplicitDuration) {
     const parsedDuration = Number(rawAction.duration);
     if (!Number.isFinite(parsedDuration) || parsedDuration < 0) {
@@ -1864,7 +1985,7 @@ function normalizeVideoAction(rawAction, index) {
   }
 
   if (isCameraAction) {
-    normalized.easing = normalizeVideoCameraEasing(rawAction.easing, declaredActionName, index);
+    normalized.easing = normalizeVideoEasing(rawAction.easing, declaredActionName, index);
     if (normalized.duration <= 0) {
       throw new Error(
         `Action "${declaredActionName}" at index ${index} requires duration > 0 for smooth camera movement.`,
@@ -2031,6 +2152,51 @@ function normalizeVideoAction(rawAction, index) {
     normalized.level = parseVideoLevel(rawAction.level, declaredActionName, index);
   }
 
+  if (actionName === 'changeLayout') {
+    if (!('duration' in rawAction)) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires a duration.`);
+    }
+    normalized.layout = normalizeVideoLayoutName(rawAction.layout, declaredActionName, index);
+    normalized.easing = normalizeVideoEasing(rawAction.easing, declaredActionName, index);
+
+    if (normalized.layout === 'radial') {
+      const centerNodeRef = rawAction.centerNodeId
+        ?? rawAction.nodeId
+        ?? rawAction.focusNodeId
+        ?? rawAction.targetNodeId;
+      normalized._layoutCenterNodeId = resolveVideoReferencedNode({
+        nodeRef: centerNodeRef,
+        fieldName: 'centerNodeId',
+        unknownLabel: 'layout center node',
+        actionName: declaredActionName,
+        index,
+      });
+      if (!normalized._layoutCenterNodeId) {
+        throw new Error(
+          `Action "${declaredActionName}" at index ${index} requires centerNodeId for radial layout.`,
+        );
+      }
+    } else {
+      normalized._layoutCenterNodeId = null;
+    }
+
+    normalized._layoutPositions = computeVideoLayoutPositions(normalized.layout, {
+      centerNodeId: normalized._layoutCenterNodeId,
+    });
+  }
+
+  if (actionName === 'highlightCategory') {
+    if (typeof rawAction.category !== 'string' || rawAction.category.trim().length === 0) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires a category.`);
+    }
+    normalized.category = resolveVideoCategoryName(rawAction.category);
+    if (!normalized.category) {
+      throw new Error(
+        `Action "${declaredActionName}" at index ${index} references unknown category "${rawAction.category}".`,
+      );
+    }
+  }
+
   if (actionName === 'highlightDepthGroupNodes') {
     if (!('level' in rawAction)) {
       throw new Error(`Action "${declaredActionName}" at index ${index} requires a level.`);
@@ -2078,6 +2244,7 @@ function normalizeVideoScript(scriptInput) {
     });
 
   let activeCameraAnimationEnd = -Infinity;
+  let activeLayoutAnimationEnd = -Infinity;
   for (const action of actions) {
     if (!isCameraTimelineAction(action.action) || action.duration <= 0) continue;
     if (action.at + VIDEO_DURATION_EPSILON < activeCameraAnimationEnd) {
@@ -2087,6 +2254,17 @@ function normalizeVideoScript(scriptInput) {
       );
     }
     activeCameraAnimationEnd = action.at + action.duration;
+  }
+
+  for (const action of actions) {
+    if (action.action !== 'changeLayout' || action.duration <= 0) continue;
+    if (action.at + VIDEO_DURATION_EPSILON < activeLayoutAnimationEnd) {
+      throw new Error(
+        `Layout action "${action.action}" at t=${action.at} overlaps a previous layout action.`
+          + ' Overlapping layout actions are not supported.',
+      );
+    }
+    activeLayoutAnimationEnd = action.at + action.duration;
   }
 
   return {
@@ -2107,6 +2285,8 @@ function createInitialVideoSeekState() {
   const fallbackCameraState = Renderer.getCameraState();
   return {
     visibilityMode: VIDEO_GRAPH_VISIBILITY.REVEALED,
+    layout: videoTimelineState.baseLayout ?? currentLayout,
+    nodePositions: clonePositionMap(videoTimelineState.baseNodePositions ?? captureCurrentGraphPositions()),
     selectedNodeIds: new Set(),
     focusNodeId: null,
     showPrerequisites: true,
@@ -2158,6 +2338,36 @@ function applyVideoDirectionalHighlightState(state, action, relationKey) {
   );
 }
 
+function applyVideoLayoutState(state, action, progress) {
+  const startPositions = state.nodePositions instanceof Map
+    ? state.nodePositions
+    : captureCurrentGraphPositions();
+  const targetPositions = action._layoutPositions instanceof Map
+    ? action._layoutPositions
+    : startPositions;
+  const eased = action.duration > 0
+    ? easeVideoProgress(progress, action.easing)
+    : 1;
+
+  if (eased >= 1 - VIDEO_DURATION_EPSILON) {
+    state.nodePositions = clonePositionMap(targetPositions);
+  } else {
+    const nextPositions = new Map();
+    for (const node of graph.nodes) {
+      const start = startPositions.get(node.id) ?? {
+        x: Number.isFinite(node.x) ? node.x : 0,
+        y: Number.isFinite(node.y) ? node.y : 0,
+        z: Number.isFinite(node.z) ? node.z : 0,
+      };
+      const target = targetPositions.get(node.id) ?? start;
+      nextPositions.set(node.id, lerpVec3(start, target, eased));
+    }
+    state.nodePositions = nextPositions;
+  }
+
+  state.layout = action.layout;
+}
+
 function applyVideoDepthGroupHighlightState(state, action) {
   const depthNodeSet = getNodesAtDepthLevel(action.level);
   state.selectedNodeIds = depthNodeSet;
@@ -2167,6 +2377,26 @@ function applyVideoDepthGroupHighlightState(state, action) {
   state.showDependents = false;
   state.contextOverride = {
     selectedNodeSet: depthNodeSet,
+    prerequisiteSet: new Set(),
+    dependentSet: new Set(),
+  };
+}
+
+function applyVideoCategoryHighlightState(state, action) {
+  const categoryNodeSet = new Set();
+  for (const node of graph.nodes) {
+    if (node.category === action.category) {
+      categoryNodeSet.add(node.id);
+    }
+  }
+
+  state.selectedNodeIds = categoryNodeSet;
+  state.focusNodeId = getFirstSetValue(categoryNodeSet);
+  state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+  state.showPrerequisites = false;
+  state.showDependents = false;
+  state.contextOverride = {
+    selectedNodeSet: categoryNodeSet,
     prerequisiteSet: new Set(),
     dependentSet: new Set(),
   };
@@ -2437,6 +2667,9 @@ function applyVideoActionAtTime(state, action, timelineTime) {
     case 'moveCamera':
       applyVideoMoveCamera(state, action, cameraProgress);
       break;
+    case 'changeLayout':
+      applyVideoLayoutState(state, action, progress);
+      break;
     case 'highlightNeighbors':
       applyVideoSelectState(state, {
         ...action,
@@ -2449,6 +2682,9 @@ function applyVideoActionAtTime(state, action, timelineTime) {
       break;
     case 'highlightDependencies':
       applyVideoDirectionalHighlightState(state, action, 'from');
+      break;
+    case 'highlightCategory':
+      applyVideoCategoryHighlightState(state, action);
       break;
     case 'highlightDepthGroupNodes':
       applyVideoDepthGroupHighlightState(state, action);
@@ -2734,6 +2970,7 @@ function applyVideoSeekStateToScene(state, timelineTime) {
   if (videoTimelineState.appliedSceneVersion !== state.sceneVersion) {
     pathHighlightState.showPrerequisites = state.showPrerequisites;
     pathHighlightState.showDependents = state.showDependents;
+    currentLayout = state.layout ?? videoTimelineState.baseLayout ?? currentLayout;
 
     selectedNodeIds = new Set(state.selectedNodeIds);
     selectedNodeId = selectedNodeIds.has(state.focusNodeId)
@@ -2741,6 +2978,8 @@ function applyVideoSeekStateToScene(state, timelineTime) {
       : getFirstSetValue(selectedNodeIds);
     hoveredNodeId = null;
     if (container) container.style.cursor = 'default';
+    applyPositions(state.nodePositions ?? videoTimelineState.baseNodePositions ?? captureCurrentGraphPositions());
+    Renderer.updatePositions();
 
     if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.HIDDEN) {
       applyHiddenGraphStyle();
@@ -2801,9 +3040,11 @@ function enableVideoRenderMode() {
 
 async function runVideoScript(scriptInput) {
   videoNodeLookupMap = null;
+  videoCategoryLookupMap = null;
   const normalizedScript = normalizeVideoScript(scriptInput);
   const actions = normalizedScript.actions;
   const fallbackCameraState = cloneCameraState(Renderer.getCameraState());
+  const fallbackNodePositions = captureCurrentGraphPositions();
   const cameraStartState = cloneCameraState(
     normalizedScript.cameraStart ?? fallbackCameraState,
   );
@@ -2811,6 +3052,8 @@ async function runVideoScript(scriptInput) {
   videoTimelineState.actions = actions;
   videoTimelineState.duration = computeVideoScriptDuration(actions);
   videoTimelineState.baseCameraState = cameraStartState;
+  videoTimelineState.baseNodePositions = clonePositionMap(fallbackNodePositions);
+  videoTimelineState.baseLayout = currentLayout;
   videoTimelineState.cameraEnd = cloneCameraState(normalizedScript.cameraEnd);
   videoTimelineState.active = true;
   videoTimelineState.currentTime = 0;
