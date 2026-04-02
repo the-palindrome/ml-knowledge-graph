@@ -189,6 +189,7 @@ Optional:
 - `highlightPrerequisites` (boolean): alias of `showPrerequisites`
 - `showDependents` (boolean)
 - `highlightDependents` (boolean): alias of `showDependents`
+- `nonFocusOpacity` (number in `[0,1]`, default `0.16`)
 - `duration` (default `0`): contextual highlight transition duration
 - `at`
 

@@ -637,6 +637,7 @@ function buildBaseVideoVisualStyle({
 function buildContextVideoVisualStyle(selectionContext, {
   showPrerequisites = true,
   showDependents = false,
+  nonFocusOpacity = NON_FOCUS_NODE_OPACITY,
   edgeOpacity = videoTimelineState.active ? 0 : SELECTED_CONTEXT_EDGE_OPACITY,
 } = {}) {
   const {
@@ -658,7 +659,7 @@ function buildContextVideoVisualStyle(selectionContext, {
     const isActive = activeNodeSet.has(node.id);
     colorMap.set(node.id, {
       ...(isActive ? getCategoryColor(node.category) : getNodeBaseColor(node)),
-      a: isActive ? 1 : NON_FOCUS_NODE_OPACITY,
+      a: isActive ? 1 : nonFocusOpacity,
     });
   }
 
@@ -706,6 +707,7 @@ function buildVideoVisualStyleForState(state) {
       {
         showPrerequisites: state.showPrerequisites,
         showDependents: state.showDependents,
+        nonFocusOpacity: state.nonFocusOpacity,
       },
     );
   }
@@ -1811,6 +1813,16 @@ function parseVideoLevel(value, actionName, index, fieldName = 'level') {
   return parsed;
 }
 
+function parseVideoOpacity(value, actionName, index, fieldName = 'opacity') {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(
+      `Action "${actionName}" at index ${index} has invalid ${fieldName}; expected a number in [0,1].`,
+    );
+  }
+  return parsed;
+}
+
 function getVideoCameraDefaultDuration(actionName) {
   if (VIDEO_ORBIT_ACTIONS.has(actionName)) {
     return VIDEO_DEFAULT_ORBIT_DURATION;
@@ -2202,6 +2214,22 @@ function normalizeVideoAction(rawAction, index) {
     );
   }
 
+  if (
+    (actionName === 'selectNode'
+      || actionName === 'focusNode'
+      || actionName === 'highlightNeighbors'
+      || actionName === 'highlightDescendants'
+      || actionName === 'highlightDependencies')
+    && 'nonFocusOpacity' in rawAction
+  ) {
+    normalized.nonFocusOpacity = parseVideoOpacity(
+      rawAction.nonFocusOpacity,
+      declaredActionName,
+      index,
+      'nonFocusOpacity',
+    );
+  }
+
   if (isCameraAction) {
     normalized.easing = normalizeVideoEasing(rawAction.easing, declaredActionName, index);
     if (normalized.duration <= 0) {
@@ -2523,6 +2551,7 @@ function createInitialVideoSeekState() {
     focusNodeId: null,
     showPrerequisites: true,
     showDependents: false,
+    nonFocusOpacity: NON_FOCUS_NODE_OPACITY,
     contextOverride: null,
     tooltips: new Map(),
     cameraState: cloneCameraState(videoTimelineState.baseCameraState ?? fallbackCameraState),
@@ -2551,6 +2580,11 @@ function applyVideoSelectState(state, action) {
   }
   if (typeof action.highlightDependents === 'boolean') {
     state.showDependents = action.highlightDependents;
+  }
+  if (typeof action.nonFocusOpacity === 'number') {
+    state.nonFocusOpacity = action.nonFocusOpacity;
+  } else {
+    state.nonFocusOpacity = NON_FOCUS_NODE_OPACITY;
   }
 }
 
