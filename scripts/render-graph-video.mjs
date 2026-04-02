@@ -560,35 +560,6 @@ function attachPageDiagnostics(page, logger, verbose) {
   });
 }
 
-async function getCanvasCaptureClip(page) {
-  return page.evaluate(() => {
-    const canvas = document.querySelector('#canvas-container canvas')
-      ?? document.querySelector('canvas');
-    if (!canvas) {
-      throw new Error('Could not find the graph canvas for screenshot capture.');
-    }
-
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height,
-      scale: 1,
-    };
-  });
-}
-
-async function captureFrameAsPngBuffer(client, clip) {
-  const { data } = await client.send('Page.captureScreenshot', {
-    format: 'png',
-    clip,
-    fromSurface: true,
-    captureBeyondViewport: false,
-  });
-  return Buffer.from(data, 'base64');
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const logger = makeLogger(args.verbose);

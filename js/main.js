@@ -242,7 +242,7 @@ async function init() {
   Renderer.initRenderer(container);
   Renderer.setPostRenderCallback(syncActiveExplorerTooltips);
   Renderer.createNodes(graph.nodes);
-  Renderer.createEdges(graph.edges, graph.nodes);
+  Renderer.createEdges(graph.edges);
 
   const cachedInitialLayout = await loadInitialLayoutCache('./knowledge_graph.layout.json');
   const initialPositions = cachedInitialLayout ?? computeForceLayout(graph.nodes, graph.edges);
@@ -1530,7 +1530,6 @@ function applySelectionHighlight(selectionContext, options = {}) {
 
   const colorMap = new Map();
   for (const n of graph.nodes) {
-    const isSelected = selectedNodeSet.has(n.id);
     const isActive = activeNodeSet.has(n.id);
     const baseColor = isActive ? getCategoryColor(n.category) : getNodeBaseColor(n);
     colorMap.set(n.id, {
@@ -3143,15 +3142,6 @@ function drawTooltipIntoCapture(sourceCanvas, targetCanvas) {
     drewTooltip = drawSingleTooltipIntoCapture(tooltipRef, sourceCanvas, targetCanvas) || drewTooltip;
   }
   return drewTooltip;
-}
-
-function applyHiddenGraphStyle() {
-  applyBaseGraphStyle({
-    nodeOpacity: 0,
-    edgeOpacity: 0,
-    updateNodePositions: false,
-    updateNodeTransforms: true,
-  });
 }
 
 function serializeVideoTooltips(tooltipMap) {

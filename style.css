@@ -521,7 +521,6 @@ body.resizing-panels {
 }
 
 #info-panel-header,
-.analytics-panel-header,
 .panel-header {
   display: flex;
   align-items: center;

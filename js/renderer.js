@@ -37,15 +37,10 @@ let deferredArrowRefresh = false;
 let activeCameraAnimation = null;
 let renderLoopStarted = false;
 let renderLoopPaused = false;
-let videoRenderMode = false;
 let edgeDirectionVisible = true;
 let postRenderCallback = null;
-let pngEncoderWarmed = false;
 let screenshotCanvas = null;
 let screenshotContext = null;
-let videoCaptureStream = null;
-let videoCaptureTrack = null;
-let videoImageCapture = null;
 
 const dummy = new THREE.Object3D();
 const tempColor = new THREE.Color();
@@ -79,7 +74,6 @@ const SHOW_EDGE_ARROWS = true;
 const ARROW_T_START = 0.08;
 const ARROW_T_END = 0.92;
 const DEFAULT_EDGE_CURVE_SEGMENTS = 24;
-const VIDEO_EDGE_CURVE_SEGMENTS = 4;
 const EDGE_CURVE_STRENGTH_BASE = 0.14;
 const EDGE_CURVE_STRENGTH_VARIANCE = 0.1;
 const EDGE_CURVE_MAX_BEND = 50;
@@ -87,7 +81,6 @@ const EDGE_LINE_WIDTH = 0.85;
 const DEFAULT_MAX_PIXEL_RATIO = 2.0;
 const ANIMATION_PIXEL_RATIO = 1.0;
 const DEFAULT_NODE_GEOMETRY_DETAIL = { widthSegments: 32, heightSegments: 24 };
-const VIDEO_NODE_GEOMETRY_DETAIL = { widthSegments: 6, heightSegments: 4 };
 const NODE_BASE_OPACITY = 1.0;
 const OPAQUE_NODE_ALPHA_CUTOFF = 0.999;
 const HIDDEN_NODE_ALPHA_EPSILON = 0.001;
@@ -105,12 +98,6 @@ function createNodeGeometry({ widthSegments, heightSegments }) {
     );
   }
   return geometry;
-}
-
-function getNodeGeometryForCurrentMode() {
-  return createNodeGeometry(
-    videoRenderMode ? VIDEO_NODE_GEOMETRY_DETAIL : DEFAULT_NODE_GEOMETRY_DETAIL,
-  );
 }
 
 function forEachNodeMesh(visitor) {
@@ -157,10 +144,6 @@ vec4 diffuseColor = vec4( diffuse, opacity );`,
   };
   material.customProgramCacheKey = () => `node-instance-opacity-${pass}-v1`;
   return material;
-}
-
-function getEdgeCurveSegments() {
-  return videoRenderMode ? VIDEO_EDGE_CURVE_SEGMENTS : DEFAULT_EDGE_CURVE_SEGMENTS;
 }
 
 function smootherStep(t) {
@@ -336,56 +319,6 @@ function getTargetPixelRatio() {
   return Math.min(window.devicePixelRatio || 1, DEFAULT_MAX_PIXEL_RATIO);
 }
 
-function warmPngEncoder() {
-  if (pngEncoderWarmed || typeof document === "undefined") return false;
-
-  try {
-    const warmupCanvas = document.createElement("canvas");
-    warmupCanvas.width = 1;
-    warmupCanvas.height = 1;
-
-    const context = warmupCanvas.getContext("2d");
-    if (context) {
-      context.fillStyle = "#000000";
-      context.fillRect(0, 0, 1, 1);
-    }
-    warmupCanvas.toDataURL("image/png");
-  } catch {
-    // Best-effort warmup only; the main capture path remains authoritative.
-  }
-  pngEncoderWarmed = true;
-  return false;
-}
-
-function encodeCanvasToDataUrl(targetCanvas, mimeType, quality) {
-  if (typeof targetCanvas.toBlob !== "function") {
-    return Promise.resolve(targetCanvas.toDataURL(mimeType, quality));
-  }
-
-  return new Promise((resolve, reject) => {
-    targetCanvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error("Canvas encoding failed."));
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result ?? ""));
-      reader.onerror = () => reject(reader.error ?? new Error("Failed to read encoded canvas."));
-      reader.readAsDataURL(blob);
-    }, mimeType, quality);
-  });
-}
-
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob."));
-    reader.readAsDataURL(blob);
-  });
-}
-
 function getScreenshotCanvas(width, height) {
   if (!screenshotCanvas) {
     screenshotCanvas = document.createElement("canvas");
@@ -400,34 +333,6 @@ function getScreenshotCanvas(width, height) {
   }
 
   return screenshotCanvas;
-}
-
-function ensureVideoImageCapture() {
-  if (
-    videoImageCapture
-    && videoCaptureTrack
-    && videoCaptureTrack.readyState === "live"
-  ) {
-    return videoImageCapture;
-  }
-
-  const sourceCanvas = renderer?.domElement;
-  if (!sourceCanvas || typeof sourceCanvas.captureStream !== "function") {
-    return null;
-  }
-  if (typeof ImageCapture !== "function") {
-    return null;
-  }
-
-  videoCaptureStream = sourceCanvas.captureStream(0);
-  const [track] = videoCaptureStream.getVideoTracks();
-  if (!track) {
-    return null;
-  }
-
-  videoCaptureTrack = track;
-  videoImageCapture = new ImageCapture(track);
-  return videoImageCapture;
 }
 
 export function initRenderer(containerEl) {
@@ -498,8 +403,8 @@ export function createNodes(nodeArray) {
   nodeOpacityArray.fill(1);
   initializeNodeVisualState(nodes.length);
 
-  const opaqueGeometry = getNodeGeometryForCurrentMode();
-  const transparentGeometry = getNodeGeometryForCurrentMode();
+  const opaqueGeometry = createNodeGeometry(DEFAULT_NODE_GEOMETRY_DETAIL);
+  const transparentGeometry = createNodeGeometry(DEFAULT_NODE_GEOMETRY_DETAIL);
   const opaqueMaterial = createNodeMaterial("opaque");
   const transparentMaterial = createNodeMaterial("transparent");
 
@@ -547,7 +452,7 @@ export function createNodes(nodeArray) {
 
 // --- Edge lines (thick with arrows) ---
 
-export function createEdges(edges, nodeArray) {
+export function createEdges(edges) {
   edgeList = [];
   for (const edge of edges) {
     const si = nodeIdToIndex.get(edge.source);
@@ -558,7 +463,7 @@ export function createEdges(edges, nodeArray) {
   }
 
   // Thick line segments via LineMaterial
-  edgePositions = new Float32Array(edgeList.length * getEdgeCurveSegments() * 6);
+  edgePositions = new Float32Array(edgeList.length * DEFAULT_EDGE_CURVE_SEGMENTS * 6);
   fillEdgePositions(edgeList, edgePositions);
   const geo = new LineSegmentsGeometry();
   geo.setPositions(edgePositions);
@@ -584,7 +489,7 @@ export function createEdges(edges, nodeArray) {
 }
 
 function fillEdgePositions(list, arr) {
-  const segmentCount = getEdgeCurveSegments();
+  const segmentCount = DEFAULT_EDGE_CURVE_SEGMENTS;
   let off = 0;
   for (let i = 0; i < list.length; i++) {
     computeCurveFrame(list[i], curveSource, curveControl, curveTarget);
@@ -617,7 +522,7 @@ function fillEdgePositions(list, arr) {
 }
 
 function updateLinePositions(lineMesh, list, arr) {
-  const expectedLength = list.length * getEdgeCurveSegments() * 6;
+  const expectedLength = list.length * DEFAULT_EDGE_CURVE_SEGMENTS * 6;
   if (arr.length !== expectedLength) {
     const nextPositions = new Float32Array(expectedLength);
     fillEdgePositions(list, nextPositions);
@@ -662,7 +567,7 @@ function hideArrowInstance(arrowMesh, instanceIdx) {
 }
 
 function shouldShowHighlightedArrowheads() {
-  return edgeDirectionVisible && !videoRenderMode && !animationPerformanceMode;
+  return edgeDirectionVisible && !animationPerformanceMode;
 }
 
 function syncHighlightedArrowVisibility() {
@@ -691,7 +596,7 @@ function updateEdgeLayer(layer, { updateEdges, updateArrows }) {
   }
 
   if (layer.arrows && layer.edgeList) {
-    if (updateArrows && !animationPerformanceMode && !videoRenderMode) {
+    if (updateArrows && !animationPerformanceMode) {
       positionArrows(layer.arrows, layer.edgeList);
     } else {
       deferredArrowRefresh = true;
@@ -1007,7 +912,7 @@ function createHighlightLayer(
   linewidth = EDGE_LINE_WIDTH,
   opacity = 0.6,
 ) {
-  const positions = new Float32Array(pairs.length * getEdgeCurveSegments() * 6);
+  const positions = new Float32Array(pairs.length * DEFAULT_EDGE_CURVE_SEGMENTS * 6);
   fillEdgePositions(pairs, positions);
   const geo = new LineSegmentsGeometry();
   geo.setPositions(positions);
@@ -1227,32 +1132,6 @@ export function setDeterministicMode(enabled) {
   controls.update();
 }
 
-export function setVideoRenderMode(enabled) {
-  const nextMode = Boolean(enabled);
-  if (videoRenderMode === nextMode) return;
-  videoRenderMode = nextMode;
-
-  forEachNodeMesh((mesh) => {
-    const previousGeometry = mesh.geometry;
-    mesh.geometry = getNodeGeometryForCurrentMode();
-    previousGeometry.dispose();
-    mesh.geometry.attributes.instanceOpacity.needsUpdate = true;
-  });
-
-  forEachEdgeLayer((layer) => {
-    if (layer.lines && layer.edgeList && layer.positions) {
-      layer.positions = updateLinePositions(layer.lines, layer.edgeList, layer.positions);
-    }
-    if (layer.arrows) {
-      layer.arrows.visible = shouldShowHighlightedArrowheads();
-    }
-  });
-
-  if (renderer) {
-    onResize();
-  }
-}
-
 export function getCameraState() {
   if (!camera || !controls) {
     return null;
@@ -1329,19 +1208,6 @@ export function startRenderLoop() {
   animate();
 }
 
-export async function captureVideoFrame(options = {}) {
-  const {
-    render = true,
-    mimeType = "image/png",
-    quality,
-  } = options;
-
-  if (render) {
-    renderFrame({ updateControls: false });
-  }
-  return encodeCanvasToDataUrl(renderer.domElement, mimeType, quality);
-}
-
 export function captureScreenshot(options = {}) {
   const {
     render = true,
@@ -1358,8 +1224,4 @@ export function captureScreenshot(options = {}) {
   screenshotContext.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
 
   return targetCanvas.toDataURL(mimeType, quality);
-}
-
-export function getContainer() {
-  return container;
 }

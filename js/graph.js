@@ -196,22 +196,3 @@ export function getUpstream(nodeId, nodeMap) {
 export function getDownstream(nodeId, nodeMap) {
   return traverseReachable(nodeId, nodeMap, 'to');
 }
-
-export function getUpstreamDistances(startId, nodeMap) {
-  const distances = new Map();
-  const queue = [startId];
-  distances.set(startId, 0);
-  for (let q = 0; q < queue.length; q++) {
-    const current = queue[q];
-    const node = nodeMap.get(current);
-    if (!node) continue;
-    const d = distances.get(current);
-    for (const pid of node.from) {
-      if (!distances.has(pid)) {
-        distances.set(pid, d + 1);
-        queue.push(pid);
-      }
-    }
-  }
-  return distances;
-}
