@@ -606,6 +606,191 @@ function buildVideoDirectionalSelectionContext(selectedIds, rootNodeId, relation
   return { selectedNodeSet, prerequisiteSet, dependentSet };
 }
 
+function cloneVideoSelectionContext(selectionContext) {
+  return {
+    selectedNodeSet: new Set(selectionContext?.selectedNodeSet ?? []),
+    prerequisiteSet: new Set(selectionContext?.prerequisiteSet ?? []),
+    dependentSet: new Set(selectionContext?.dependentSet ?? []),
+  };
+}
+
+function buildBaseVideoVisualStyle({
+  nodeOpacity = 1,
+  edgeOpacity = BASE_EDGE_OPACITY,
+} = {}) {
+  const colorMap = new Map();
+  for (const node of graph.nodes) {
+    colorMap.set(node.id, {
+      ...getNodeBaseColor(node),
+      a: nodeOpacity,
+    });
+  }
+
+  return {
+    colorMap,
+    edgeOpacity,
+    edgeGroups: [],
+  };
+}
+
+function buildContextVideoVisualStyle(selectionContext, {
+  showPrerequisites = true,
+  showDependents = false,
+  edgeOpacity = videoTimelineState.active ? 0 : SELECTED_CONTEXT_EDGE_OPACITY,
+} = {}) {
+  const {
+    selectedNodeSet,
+    prerequisiteSet,
+    dependentSet,
+  } = cloneVideoSelectionContext(selectionContext);
+
+  const activeNodeSet = new Set(selectedNodeSet);
+  if (showPrerequisites) {
+    for (const nodeId of prerequisiteSet) activeNodeSet.add(nodeId);
+  }
+  if (showDependents) {
+    for (const nodeId of dependentSet) activeNodeSet.add(nodeId);
+  }
+
+  const colorMap = new Map();
+  for (const node of graph.nodes) {
+    const isActive = activeNodeSet.has(node.id);
+    colorMap.set(node.id, {
+      ...(isActive ? getCategoryColor(node.category) : getNodeBaseColor(node)),
+      a: isActive ? 1 : NON_FOCUS_NODE_OPACITY,
+    });
+  }
+
+  const edgeGroups = [];
+  if (showPrerequisites) {
+    edgeGroups.push({
+      nodeSet: prerequisiteSet,
+      colorHex: PREREQUISITES_EDGE_COLOR,
+      opacity: 0.6,
+    });
+  }
+  if (showDependents) {
+    edgeGroups.push({
+      nodeSet: dependentSet,
+      colorHex: DEPENDENTS_EDGE_COLOR,
+      opacity: 0.6,
+    });
+  }
+
+  return {
+    colorMap,
+    edgeOpacity,
+    edgeGroups,
+  };
+}
+
+function getVideoSelectionContextForState(state) {
+  if (state.contextOverride) {
+    return cloneVideoSelectionContext(state.contextOverride);
+  }
+  return getSelectionContext(state.selectedNodeIds);
+}
+
+function buildVideoVisualStyleForState(state) {
+  if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.HIDDEN) {
+    return buildBaseVideoVisualStyle({
+      nodeOpacity: 0,
+      edgeOpacity: 0,
+    });
+  }
+
+  if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.CONTEXT && state.selectedNodeIds.size > 0) {
+    return buildContextVideoVisualStyle(
+      getVideoSelectionContextForState(state),
+      {
+        showPrerequisites: state.showPrerequisites,
+        showDependents: state.showDependents,
+      },
+    );
+  }
+
+  return buildBaseVideoVisualStyle();
+}
+
+function serializeVideoEdgeGroupKey(edgeGroup) {
+  return [
+    edgeGroup.colorHex ?? '',
+    edgeGroup.linewidth ?? '',
+    [...(edgeGroup.nodeSet ?? [])].sort().join(','),
+  ].join('|');
+}
+
+function accumulateVideoEdgeGroups(groupMap, groups, factor) {
+  if (!Array.isArray(groups) || factor <= VIDEO_DURATION_EPSILON) return;
+
+  for (const group of groups) {
+    if (!group?.nodeSet || group.nodeSet.size === 0) continue;
+    const opacity = clamp01((group.opacity ?? 0.6) * factor);
+    if (opacity <= VIDEO_DURATION_EPSILON) continue;
+
+    const key = serializeVideoEdgeGroupKey(group);
+    const existing = groupMap.get(key);
+    if (existing) {
+      existing.opacity = clamp01(existing.opacity + opacity);
+      continue;
+    }
+
+    groupMap.set(key, {
+      nodeSet: new Set(group.nodeSet),
+      colorHex: group.colorHex,
+      linewidth: group.linewidth,
+      opacity,
+    });
+  }
+}
+
+function blendVideoVisualStyles(fromStyle, toStyle, progress) {
+  const t = clamp01(progress);
+  const fromResolved = fromStyle ?? buildBaseVideoVisualStyle();
+  const toResolved = toStyle ?? buildBaseVideoVisualStyle();
+  const colorMap = new Map();
+
+  for (const node of graph.nodes) {
+    const fromColor = fromResolved.colorMap?.get(node.id) ?? {
+      ...getNodeBaseColor(node),
+      a: 1,
+    };
+    const toColor = toResolved.colorMap?.get(node.id) ?? {
+      ...getNodeBaseColor(node),
+      a: 1,
+    };
+
+    colorMap.set(node.id, {
+      h: lerpScalar(fromColor.h, toColor.h, t),
+      s: lerpScalar(fromColor.s, toColor.s, t),
+      l: lerpScalar(fromColor.l, toColor.l, t),
+      a: lerpScalar(fromColor.a, toColor.a, t),
+    });
+  }
+
+  const edgeGroups = new Map();
+  accumulateVideoEdgeGroups(edgeGroups, fromResolved.edgeGroups, 1 - t);
+  accumulateVideoEdgeGroups(edgeGroups, toResolved.edgeGroups, t);
+
+  return {
+    colorMap,
+    edgeOpacity: lerpScalar(fromResolved.edgeOpacity ?? 0, toResolved.edgeOpacity ?? 0, t),
+    edgeGroups: [...edgeGroups.values()],
+  };
+}
+
+function applyVideoVisualStyle(style) {
+  const resolvedStyle = style ?? buildBaseVideoVisualStyle();
+  Renderer.updateColors(resolvedStyle.colorMap, { animate: false });
+  Renderer.updateNodeTransforms({ animateScale: false });
+  Renderer.setEdgeOpacity(resolvedStyle.edgeOpacity ?? 0);
+  if (resolvedStyle.edgeGroups?.length) {
+    Renderer.showHighlightEdgeGroups(resolvedStyle.edgeGroups);
+    return;
+  }
+  Renderer.clearHighlightEdges();
+}
+
 function getNodesAtDepthLevel(level) {
   const nodeSet = new Set();
   if (!graph) return nodeSet;
@@ -2295,10 +2480,12 @@ function computeVideoScriptDuration(actions) {
 
 function createInitialVideoSeekState() {
   const fallbackCameraState = Renderer.getCameraState();
+  const visualStyle = buildBaseVideoVisualStyle();
   return {
     visibilityMode: VIDEO_GRAPH_VISIBILITY.REVEALED,
     layout: videoTimelineState.baseLayout ?? currentLayout,
     nodePositions: clonePositionMap(videoTimelineState.baseNodePositions ?? captureCurrentGraphPositions()),
+    visualStyle,
     selectedNodeIds: new Set(),
     focusNodeId: null,
     showPrerequisites: true,
@@ -2332,6 +2519,45 @@ function applyVideoSelectState(state, action) {
   if (typeof action.highlightDependents === 'boolean') {
     state.showDependents = action.highlightDependents;
   }
+}
+
+function applyVideoUnselectState(state, action) {
+  state.contextOverride = null;
+  if (action.nodeId) {
+    state.selectedNodeIds.delete(action.nodeId);
+  } else {
+    state.selectedNodeIds.clear();
+  }
+  if (!state.focusNodeId || !state.selectedNodeIds.has(state.focusNodeId)) {
+    state.focusNodeId = getFirstSetValue(state.selectedNodeIds);
+  }
+}
+
+function getVideoSelectionTransitionProgress(action, progress) {
+  if ((action.duration ?? 0) <= 0) return 1;
+  return easeVideoProgress(progress, 'smooth');
+}
+
+function applyVideoSelectTransitionState(state, action, progress) {
+  const previousVisualStyle = state.visualStyle ?? buildVideoVisualStyleForState(state);
+  applyVideoSelectState(state, action);
+  const nextVisualStyle = buildVideoVisualStyleForState(state);
+  state.visualStyle = blendVideoVisualStyles(
+    previousVisualStyle,
+    nextVisualStyle,
+    getVideoSelectionTransitionProgress(action, progress),
+  );
+}
+
+function applyVideoUnselectTransitionState(state, action, progress) {
+  const previousVisualStyle = state.visualStyle ?? buildVideoVisualStyleForState(state);
+  applyVideoUnselectState(state, action);
+  const nextVisualStyle = buildVideoVisualStyleForState(state);
+  state.visualStyle = blendVideoVisualStyles(
+    previousVisualStyle,
+    nextVisualStyle,
+    getVideoSelectionTransitionProgress(action, progress),
+  );
 }
 
 function applyVideoDirectionalHighlightState(state, action, relationKey) {
@@ -2656,21 +2882,14 @@ function applyVideoActionAtTime(state, action, timelineTime) {
 
   switch (action.action) {
     case 'selectNode':
-      applyVideoSelectState(state, action);
+      applyVideoSelectTransitionState(state, action, progress);
       break;
     case 'unselectNode':
-      state.contextOverride = null;
-      if (action.nodeId) {
-        state.selectedNodeIds.delete(action.nodeId);
-      } else {
-        state.selectedNodeIds.clear();
-      }
-      if (!state.focusNodeId || !state.selectedNodeIds.has(state.focusNodeId)) {
-        state.focusNodeId = getFirstSetValue(state.selectedNodeIds);
-      }
+      applyVideoUnselectTransitionState(state, action, progress);
       break;
     case 'focusNode':
       applyVideoSelectState(state, action);
+      state.visualStyle = buildVideoVisualStyleForState(state);
       applyVideoFocusCamera(state, action, cameraProgress);
       break;
     case 'cameraFocus':
@@ -2688,36 +2907,47 @@ function applyVideoActionAtTime(state, action, timelineTime) {
         showPrerequisites: true,
         showDependents: true,
       });
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'highlightDescendants':
       applyVideoDirectionalHighlightState(state, action, 'to');
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'highlightDependencies':
       applyVideoDirectionalHighlightState(state, action, 'from');
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'highlightCategory':
       applyVideoCategoryHighlightState(state, action);
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'highlightDepthGroupNodes':
       applyVideoDepthGroupHighlightState(state, action);
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'highlightDepthEdges':
       applyVideoDepthEdgesHighlightState(state, action);
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'highlightLowerSlice':
       applyVideoLowerSliceHighlightState(state, action);
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'highlightUpperSlice':
       applyVideoUpperSliceHighlightState(state, action);
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'hideGraph':
       state.visibilityMode = VIDEO_GRAPH_VISIBILITY.HIDDEN;
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'fadeGraph':
       state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'revealGraph':
       state.visibilityMode = VIDEO_GRAPH_VISIBILITY.REVEALED;
+      state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'openTooltip':
     case 'closeTooltip':
@@ -2979,42 +3209,25 @@ function syncVideoTooltips(tooltipMap = new Map()) {
 }
 
 function applyVideoSeekStateToScene(state, timelineTime) {
-  if (videoTimelineState.appliedSceneVersion !== state.sceneVersion) {
-    pathHighlightState.showPrerequisites = state.showPrerequisites;
-    pathHighlightState.showDependents = state.showDependents;
-    currentLayout = state.layout ?? videoTimelineState.baseLayout ?? currentLayout;
+  pathHighlightState.showPrerequisites = state.showPrerequisites;
+  pathHighlightState.showDependents = state.showDependents;
+  currentLayout = state.layout ?? videoTimelineState.baseLayout ?? currentLayout;
 
-    selectedNodeIds = new Set(state.selectedNodeIds);
-    selectedNodeId = selectedNodeIds.has(state.focusNodeId)
-      ? state.focusNodeId
-      : getFirstSetValue(selectedNodeIds);
-    hoveredNodeId = null;
-    if (container) container.style.cursor = 'default';
-    applyPositions(state.nodePositions ?? videoTimelineState.baseNodePositions ?? captureCurrentGraphPositions());
-    Renderer.updatePositions();
+  selectedNodeIds = new Set(state.selectedNodeIds);
+  selectedNodeId = selectedNodeIds.has(state.focusNodeId)
+    ? state.focusNodeId
+    : getFirstSetValue(selectedNodeIds);
+  hoveredNodeId = null;
+  if (container) container.style.cursor = 'default';
+  applyPositions(state.nodePositions ?? videoTimelineState.baseNodePositions ?? captureCurrentGraphPositions());
+  Renderer.updatePositions({
+    animateScale: false,
+    updateEdges: true,
+    updateArrows: true,
+  });
+  applyVideoVisualStyle(state.visualStyle ?? buildVideoVisualStyleForState(state));
 
-    if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.HIDDEN) {
-      applyHiddenGraphStyle();
-    } else if (state.visibilityMode === VIDEO_GRAPH_VISIBILITY.CONTEXT && selectedNodeIds.size > 0) {
-      const selectionContext = state.contextOverride
-        ? {
-          selectedNodeSet: new Set(state.contextOverride.selectedNodeSet),
-          prerequisiteSet: new Set(state.contextOverride.prerequisiteSet),
-          dependentSet: new Set(state.contextOverride.dependentSet),
-        }
-        : getSelectionContext(selectedNodeIds);
-      selectedNodeIds = selectionContext.selectedNodeSet;
-      syncSelectedNodeIdWithSelectionSet();
-      applySelectionHighlight(selectionContext, {
-        animateCamera: false,
-        focusNodeId: selectedNodeId,
-      });
-    } else {
-      applyAmbientGraphStyle({ updateNodeTransforms: true });
-    }
-
-    videoTimelineState.appliedSceneVersion = state.sceneVersion;
-  }
+  videoTimelineState.appliedSceneVersion = state.sceneVersion;
 
   if (state.cameraState) {
     Renderer.setCameraState(state.cameraState);

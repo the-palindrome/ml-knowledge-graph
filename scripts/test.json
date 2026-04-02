@@ -26,11 +26,15 @@
   "script": [
     {
       "at": 0,
-      "action": "autoRotate",
-      "axis": "y",
-      "speed": 0.1,
-      "duration": 2,
-      "easing": "linear"
+      "action": "selectNode",
+      "nodeId": "gpt",
+      "highlightPrerequisites": true,
+      "duration": 2.0
+    },
+    {
+      "at": 2.0,
+      "action": "unselectNode",
+      "duration": 2.0
     }
   ]
 }

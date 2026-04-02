@@ -189,7 +189,8 @@ Optional:
 - `highlightPrerequisites` (boolean): alias of `showPrerequisites`
 - `showDependents` (boolean)
 - `highlightDependents` (boolean): alias of `showDependents`
-- `at`, `duration` (duration generally unused for this action)
+- `duration` (default `0`): contextual highlight transition duration
+- `at`
 
 Aliases:
 
@@ -202,7 +203,8 @@ Optional:
 
 - `nodeId` (string): if set, remove only this node from selection
 - without `nodeId`: clear all selections
-- `at`, `duration`
+- `duration` (default `0`): contextual-to-ambient/context transition duration
+- `at`
 
 Aliases:
 
