@@ -607,6 +607,46 @@ function buildVideoDirectionalSelectionContext(selectedIds, rootNodeId, relation
   return { selectedNodeSet, prerequisiteSet, dependentSet };
 }
 
+function buildVideoBoundedSelectionContext(
+  selectedIds,
+  rootNodeId,
+  {
+    prerequisiteLevel = null,
+    dependentLevel = null,
+  } = {},
+) {
+  const selectedNodeSet = new Set();
+  const prerequisiteSet = new Set();
+  const dependentSet = new Set();
+
+  if (!graph) {
+    return { selectedNodeSet, prerequisiteSet, dependentSet };
+  }
+
+  for (const nodeId of selectedIds) {
+    if (graph.nodeMap.has(nodeId)) {
+      selectedNodeSet.add(nodeId);
+    }
+  }
+
+  for (const nodeId of selectedNodeSet) {
+    prerequisiteSet.add(nodeId);
+    dependentSet.add(nodeId);
+  }
+
+  if (Number.isInteger(prerequisiteLevel) && prerequisiteLevel >= 0) {
+    const boundedPrerequisites = getBoundedRelationSet(rootNodeId, 'from', prerequisiteLevel);
+    for (const nodeId of boundedPrerequisites) prerequisiteSet.add(nodeId);
+  }
+
+  if (Number.isInteger(dependentLevel) && dependentLevel >= 0) {
+    const boundedDependents = getBoundedRelationSet(rootNodeId, 'to', dependentLevel);
+    for (const nodeId of boundedDependents) dependentSet.add(nodeId);
+  }
+
+  return { selectedNodeSet, prerequisiteSet, dependentSet };
+}
+
 function cloneVideoSelectionContext(selectionContext) {
   return {
     selectedNodeSet: new Set(selectionContext?.selectedNodeSet ?? []),
@@ -2230,6 +2270,13 @@ function normalizeVideoAction(rawAction, index) {
     );
   }
 
+  if (
+    (actionName === 'selectNode' || actionName === 'focusNode')
+    && 'level' in rawAction
+  ) {
+    normalized.level = parseVideoLevel(rawAction.level, declaredActionName, index);
+  }
+
   if (isCameraAction) {
     normalized.easing = normalizeVideoEasing(rawAction.easing, declaredActionName, index);
     if (normalized.duration <= 0) {
@@ -2585,6 +2632,17 @@ function applyVideoSelectState(state, action) {
     state.nonFocusOpacity = action.nonFocusOpacity;
   } else {
     state.nonFocusOpacity = NON_FOCUS_NODE_OPACITY;
+  }
+
+  if (typeof action.level === 'number' && (state.showPrerequisites || state.showDependents)) {
+    state.contextOverride = buildVideoBoundedSelectionContext(
+      state.selectedNodeIds,
+      action.nodeId,
+      {
+        prerequisiteLevel: state.showPrerequisites ? action.level : null,
+        dependentLevel: state.showDependents ? action.level : null,
+      },
+    );
   }
 }
 
