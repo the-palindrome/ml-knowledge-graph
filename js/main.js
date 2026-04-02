@@ -2593,6 +2593,17 @@ function applyVideoUnselectTransitionState(state, action, progress) {
   );
 }
 
+function applyVideoVisibilityTransitionState(state, nextVisibilityMode, progress) {
+  const previousVisualStyle = state.visualStyle ?? buildVideoVisualStyleForState(state);
+  state.visibilityMode = nextVisibilityMode;
+  const nextVisualStyle = buildVideoVisualStyleForState(state);
+  state.visualStyle = blendVideoVisualStyles(
+    previousVisualStyle,
+    nextVisualStyle,
+    easeVideoProgress(progress, 'smooth'),
+  );
+}
+
 function applyVideoDirectionalHighlightState(state, action, relationKey) {
   const isDependencies = relationKey === 'from';
   applyVideoSelectState(state, {
@@ -2971,16 +2982,14 @@ function applyVideoActionAtTime(state, action, timelineTime) {
       state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'hideGraph':
-      state.visibilityMode = VIDEO_GRAPH_VISIBILITY.HIDDEN;
-      state.visualStyle = buildVideoVisualStyleForState(state);
+      applyVideoVisibilityTransitionState(state, VIDEO_GRAPH_VISIBILITY.HIDDEN, progress);
       break;
     case 'fadeGraph':
       state.visibilityMode = VIDEO_GRAPH_VISIBILITY.CONTEXT;
       state.visualStyle = buildVideoVisualStyleForState(state);
       break;
     case 'revealGraph':
-      state.visibilityMode = VIDEO_GRAPH_VISIBILITY.REVEALED;
-      state.visualStyle = buildVideoVisualStyleForState(state);
+      applyVideoVisibilityTransitionState(state, VIDEO_GRAPH_VISIBILITY.REVEALED, progress);
       break;
     case 'openTooltip':
     case 'closeTooltip':

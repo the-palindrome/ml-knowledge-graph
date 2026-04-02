@@ -350,7 +350,8 @@ Sets node and edge opacity to zero.
 
 Optional:
 
-- `at`, `duration`
+- `duration` (default `0`): continuous fade-to-hidden duration
+- `at`
 
 ### `fadeGraph`
 Applies context mode visual treatment (selected + prerequisite/dependent emphasis if any selection exists).
@@ -364,7 +365,8 @@ Restores ambient graph style (fully visible graph).
 
 Optional:
 
-- `at`, `duration`
+- `duration` (default `0`): continuous fade-to-visible duration
+- `at`
 
 ## 7.4 Relationship Emphasis
 
