@@ -370,7 +370,26 @@ Optional:
 - `duration` (default `0`): continuous fade-to-visible duration
 - `at`
 
-## 7.4 Relationship Emphasis
+## 7.4 Node Size Actions
+
+### `changeNodeSizeMode`
+Transitions node sizing to a different graph metric mode.
+
+Required:
+
+- `mode` (`"default" | "_pagerank" | "_degree_centrality" | "_betweenness_centrality" | "_descendant_ratio" | "_prerequisite_ratio" | "_reachability_ratio"`)
+
+Optional:
+
+- `duration` (default `0`): continuous size interpolation duration
+- `at`
+
+Notes:
+
+- `duration: 0` applies the new size mode immediately.
+- The transition is deterministic during timeline seeking/rendering.
+
+## 7.5 Relationship Emphasis
 
 ### `highlightNeighbors`
 Selects a node and enables both prerequisite and dependent highlighting.
@@ -478,7 +497,7 @@ Optional:
 
 - `at`, `duration`
 
-## 7.5 Tooltip / Label Actions
+## 7.6 Tooltip / Label Actions
 
 ### `openTooltip`
 Opens or updates a tooltip anchored to a node. Multiple node tooltips can be open at once.
@@ -545,6 +564,7 @@ Canonical actions:
 - `cameraFocus`
 - `moveCamera`
 - `changeLayout`
+- `changeNodeSizeMode`
 - `highlightNeighbors`
 - `highlightDescendants`
 - `highlightDependencies`
@@ -642,6 +662,7 @@ Common script validation failures:
 - unknown node reference
 - invalid vec3 format or non-finite coordinates
 - invalid `level` (must be a non-negative integer)
+- invalid node size `mode`
 - invalid `from` / `to` depth parameters (must be non-negative integers)
 - camera action with `duration <= 0`
 - invalid `axis`

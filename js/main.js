@@ -122,6 +122,7 @@ const VIDEO_SUPPORTED_ACTIONS = new Set([
   'cameraMove',
   'move',
   'changeLayout',
+  'changeNodeSizeMode',
   'highlightNeighbors',
   'highlightDescendants',
   'highlightDependencies',
@@ -178,6 +179,7 @@ const VIDEO_SCENE_STATE_ACTIONS = new Set([
   'unselectNode',
   'focusNode',
   'changeLayout',
+  'changeNodeSizeMode',
   'highlightNeighbors',
   'highlightDescendants',
   'highlightDependencies',
@@ -209,7 +211,9 @@ const videoTimelineState = {
   duration: 0,
   baseCameraState: null,
   baseNodePositions: null,
+  baseNodeScaleMap: null,
   baseLayout: 'force',
+  baseNodeSizeMode: NODE_SIZE_MODE_DEFAULT,
   cameraEnd: null,
   active: false,
   currentTime: 0,
@@ -495,6 +499,71 @@ function applyNodeSizingMode(mode) {
   for (const node of graph.nodes) {
     const scale = getScaledNodeBaseSize(mode, node[mode]);
     node._baseScale = scale;
+    node.radius = scale;
+  }
+}
+
+function captureCurrentNodeScaleMap() {
+  const scaleMap = new Map();
+  if (!graph) return scaleMap;
+
+  for (const node of graph.nodes) {
+    const scale = Number.isFinite(node._currentScale)
+      ? node._currentScale
+      : (Number.isFinite(node._baseScale) ? node._baseScale : DEFAULT_NODE_SCALE_FALLBACK_MIN);
+    scaleMap.set(node.id, scale);
+  }
+
+  return scaleMap;
+}
+
+function getNodeScaleMapForMode(mode) {
+  const scaleMap = new Map();
+  if (!graph) return scaleMap;
+
+  for (const node of graph.nodes) {
+    let scale = defaultNodeScaleMap.get(node.id);
+    if (mode !== NODE_SIZE_MODE_DEFAULT) {
+      scale = getScaledNodeBaseSize(mode, node[mode]);
+    }
+    scaleMap.set(
+      node.id,
+      Number.isFinite(scale) ? scale : DEFAULT_NODE_SCALE_FALLBACK_MIN,
+    );
+  }
+
+  return scaleMap;
+}
+
+function cloneNodeScaleMap(scaleMap) {
+  return scaleMap instanceof Map ? new Map(scaleMap) : new Map();
+}
+
+function blendNodeScaleMaps(fromScaleMap, toScaleMap, progress) {
+  const blended = new Map();
+  if (!graph) return blended;
+
+  const t = clamp01(progress);
+  for (const node of graph.nodes) {
+    const fromScale = fromScaleMap?.get(node.id);
+    const toScale = toScaleMap?.get(node.id);
+    const resolvedFrom = Number.isFinite(fromScale)
+      ? fromScale
+      : (Number.isFinite(node._baseScale) ? node._baseScale : DEFAULT_NODE_SCALE_FALLBACK_MIN);
+    const resolvedTo = Number.isFinite(toScale) ? toScale : resolvedFrom;
+    blended.set(node.id, lerpScalar(resolvedFrom, resolvedTo, t));
+  }
+
+  return blended;
+}
+
+function applyNodeScaleMap(scaleMap) {
+  if (!graph || !(scaleMap instanceof Map)) return;
+
+  for (const node of graph.nodes) {
+    const scale = scaleMap.get(node.id);
+    if (!Number.isFinite(scale)) continue;
+    node._currentScale = scale;
     node.radius = scale;
   }
 }
@@ -1898,6 +1967,16 @@ function normalizeVideoLayoutName(rawLayout, actionName, index) {
   return layout;
 }
 
+function normalizeVideoNodeSizeMode(rawMode, actionName, index) {
+  const mode = String(rawMode ?? '').trim();
+  if (!isSupportedNodeSizeMode(mode)) {
+    throw new Error(
+      `Action "${actionName}" at index ${index} has invalid node size mode "${rawMode}".`,
+    );
+  }
+  return mode;
+}
+
 function computeVideoLayoutPositions(layout, options = {}) {
   switch (layout) {
     case 'force':
@@ -2490,6 +2569,14 @@ function normalizeVideoAction(rawAction, index) {
     });
   }
 
+  if (actionName === 'changeNodeSizeMode') {
+    if (!('mode' in rawAction)) {
+      throw new Error(`Action "${declaredActionName}" at index ${index} requires a mode.`);
+    }
+    normalized.mode = normalizeVideoNodeSizeMode(rawAction.mode, declaredActionName, index);
+    normalized._nodeScaleMap = getNodeScaleMapForMode(normalized.mode);
+  }
+
   if (actionName === 'highlightCategory') {
     if (typeof rawAction.category !== 'string' || rawAction.category.trim().length === 0) {
       throw new Error(`Action "${declaredActionName}" at index ${index} requires a category.`);
@@ -2593,6 +2680,10 @@ function createInitialVideoSeekState() {
     visibilityMode: VIDEO_GRAPH_VISIBILITY.REVEALED,
     layout: videoTimelineState.baseLayout ?? currentLayout,
     nodePositions: clonePositionMap(videoTimelineState.baseNodePositions ?? captureCurrentGraphPositions()),
+    nodeSizeMode: videoTimelineState.baseNodeSizeMode ?? nodeSizeMode,
+    nodeScaleMap: cloneNodeScaleMap(
+      videoTimelineState.baseNodeScaleMap ?? captureCurrentNodeScaleMap(),
+    ),
     visualStyle,
     selectedNodeIds: new Set(),
     focusNodeId: null,
@@ -2740,6 +2831,23 @@ function applyVideoLayoutState(state, action, progress) {
   }
 
   state.layout = action.layout;
+}
+
+function applyVideoNodeSizeModeState(state, action, progress) {
+  const startScaleMap = state.nodeScaleMap instanceof Map
+    ? state.nodeScaleMap
+    : captureCurrentNodeScaleMap();
+  const targetScaleMap = action._nodeScaleMap instanceof Map
+    ? action._nodeScaleMap
+    : getNodeScaleMapForMode(action.mode);
+  const eased = action.duration > 0
+    ? easeVideoProgress(progress, 'smooth')
+    : 1;
+
+  state.nodeScaleMap = eased >= 1 - VIDEO_DURATION_EPSILON
+    ? cloneNodeScaleMap(targetScaleMap)
+    : blendNodeScaleMaps(startScaleMap, targetScaleMap, eased);
+  state.nodeSizeMode = action.mode;
 }
 
 function applyVideoDepthGroupHighlightState(state, action) {
@@ -3036,6 +3144,9 @@ function applyVideoActionAtTime(state, action, timelineTime) {
       break;
     case 'changeLayout':
       applyVideoLayoutState(state, action, progress);
+      break;
+    case 'changeNodeSizeMode':
+      applyVideoNodeSizeModeState(state, action, progress);
       break;
     case 'highlightNeighbors':
       applyVideoSelectState(state, {
@@ -3344,6 +3455,7 @@ function applyVideoSeekStateToScene(state, timelineTime) {
     : getFirstSetValue(selectedNodeIds);
   hoveredNodeId = null;
   if (container) container.style.cursor = 'default';
+  applyNodeScaleMap(state.nodeScaleMap ?? videoTimelineState.baseNodeScaleMap ?? captureCurrentNodeScaleMap());
   applyPositions(state.nodePositions ?? videoTimelineState.baseNodePositions ?? captureCurrentGraphPositions());
   Renderer.updatePositions({
     animateScale: false,
@@ -3366,6 +3478,7 @@ function applyVideoSeekStateToScene(state, timelineTime) {
     duration: videoTimelineState.duration,
     selectedNodeIds: [...selectedNodeIds],
     visibilityMode: state.visibilityMode,
+    nodeSizeMode: state.nodeSizeMode,
     sceneVersion: state.sceneVersion,
     tooltips: serializeVideoTooltips(state.tooltips),
     cameraState: state.cameraState
@@ -3403,7 +3516,9 @@ async function runVideoScript(scriptInput) {
   videoTimelineState.duration = computeVideoScriptDuration(actions);
   videoTimelineState.baseCameraState = cameraStartState;
   videoTimelineState.baseNodePositions = clonePositionMap(fallbackNodePositions);
+  videoTimelineState.baseNodeScaleMap = captureCurrentNodeScaleMap();
   videoTimelineState.baseLayout = currentLayout;
+  videoTimelineState.baseNodeSizeMode = nodeSizeMode;
   videoTimelineState.cameraEnd = cloneCameraState(normalizedScript.cameraEnd);
   videoTimelineState.active = true;
   videoTimelineState.currentTime = 0;
