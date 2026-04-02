@@ -617,6 +617,7 @@ node scripts/render-graph-video.mjs --script ./scripts/video-script.example.json
 - `--url <http(s)://...>`: use external/already-running page URL (skips local static server)
 - `--frames-dir <path>`: custom directory for PNG frames
 - `--keep-frames`: keep PNGs after ffmpeg encode
+- `--high-quality`: use lossless 4:4:4 H.264 encode (`crf=0`, larger files, slower)
 - `--verbose, -v`: enable detailed diagnostics
 - `--help, -h`: print usage
 
@@ -638,6 +639,7 @@ node scripts/render-graph-video.mjs --script ./scripts/video-script.example.json
 - Prints a continuously-updated render status line with current measured FPS, average FPS, and ETA
 - Captures one PNG per frame as `frame-000000.png`, `frame-000001.png`, ...
 - Encodes with ffmpeg (`libx264`, `yuv420p`, `+faststart`)
+- `--high-quality` switches ffmpeg to lossless 4:4:4 output (`libx264`, `crf=0`, `yuv444p`, `high444`)
 
 ## ffmpeg command shape
 
@@ -648,7 +650,25 @@ ffmpeg -y \
   -i <framesDir>/frame-%06d.png \
   -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \
   -c:v libx264 \
+  -preset veryfast \
   -pix_fmt yuv420p \
+  -movflags +faststart \
+  <output>
+```
+
+With `--high-quality`, ffmpeg switches to:
+
+```bash
+ffmpeg -y \
+  -framerate <fps> \
+  -start_number 0 \
+  -i <framesDir>/frame-%06d.png \
+  -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \
+  -c:v libx264 \
+  -preset veryslow \
+  -crf 0 \
+  -pix_fmt yuv444p \
+  -profile:v high444 \
   -movflags +faststart \
   <output>
 ```

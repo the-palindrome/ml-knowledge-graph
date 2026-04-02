@@ -34,6 +34,7 @@ Options:
   --url              Use an already-running graph URL (skip local static server)
   --frames-dir       Directory for intermediate PNG frames
   --keep-frames      Keep PNG frames after ffmpeg completes
+  --high-quality     Use lossless 4:4:4 encode settings (much larger files)
   --verbose, -v      Enable verbose diagnostics
   --help, -h         Show this help
 `);
@@ -49,6 +50,7 @@ function parseArgs(argv) {
     scriptPath: null,
     framesDir: null,
     keepFrames: false,
+    highQuality: false,
     verbose: false,
   };
 
@@ -93,6 +95,9 @@ function parseArgs(argv) {
         break;
       case '--keep-frames':
         parsed.keepFrames = true;
+        break;
+      case '--high-quality':
+        parsed.highQuality = true;
         break;
       case '--verbose':
       case '-v':
@@ -267,6 +272,26 @@ function getFrameStateSignature(frameState) {
   });
 }
 
+function getFfmpegVideoEncodeArgs({ highQuality }) {
+  if (highQuality) {
+    return [
+      '-c:v', 'libx264',
+      '-preset', 'veryslow',
+      '-crf', '0',
+      '-pix_fmt', 'yuv444p',
+      '-profile:v', 'high444',
+      '-movflags', '+faststart',
+    ];
+  }
+
+  return [
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-pix_fmt', 'yuv420p',
+    '-movflags', '+faststart',
+  ];
+}
+
 function startFfmpegEncoder(ffmpegPath, args) {
   const ffmpegArgs = [
     '-y',
@@ -278,10 +303,7 @@ function startFfmpegEncoder(ffmpegPath, args) {
     '-framerate', String(args.fps),
     '-i', 'pipe:0',
     '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
-    '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-pix_fmt', 'yuv420p',
-    '-movflags', '+faststart',
+    ...getFfmpegVideoEncodeArgs(args),
     args.output,
   ];
 
@@ -573,6 +595,11 @@ async function main() {
     printUsage();
     throw new Error('Missing required --script argument.');
   }
+  if (args.highQuality) {
+    logger.info(
+      'High-quality encoding enabled (lossless 4:4:4 H.264). Expect much larger files and slower encode time.',
+    );
+  }
 
   const scriptPath = path.resolve(args.scriptPath);
   logger.info(`Loading timeline script: ${scriptPath}`);
@@ -765,10 +792,7 @@ async function main() {
         '-start_number', '0',
         '-i', path.join(frameRoot, 'frame-%06d.png'),
         '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-pix_fmt', 'yuv420p',
-        '-movflags', '+faststart',
+        ...getFfmpegVideoEncodeArgs(args),
         args.output,
       ], { stdio: 'inherit' });
       timingStats.ffmpegFinalizeMs = performance.now() - ffmpegFinalizeStart;

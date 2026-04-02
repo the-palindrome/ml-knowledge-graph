@@ -133,6 +133,7 @@ node scripts/render-graph-video.mjs \
   --fps 30 \
   --width 1920 \
   --height 1080 \
+  --high-quality \
   --verbose
 ```
 
@@ -146,4 +147,5 @@ By default, the script:
 - stitches frames with `ffmpeg`
 
 Use `--keep-frames` if you want to preserve individual PNGs.
+Use `--high-quality` for lossless 4:4:4 export quality (much larger files, slower encode, and potentially lower playback compatibility on some hardware players).
 Use `--verbose` to print detailed diagnostics (page errors, request failures, and per-frame seek/capture/write timing).
