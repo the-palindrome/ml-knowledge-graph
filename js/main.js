@@ -75,6 +75,7 @@ const TOOLTIP_MARGIN = 14;
 const TOOLTIP_MIN_WIDTH = 120;
 const TOOLTIP_CONNECTOR_SOURCE_X = 4;
 const TOOLTIP_CONNECTOR_JOINT_X = 22;
+const TOOLTIP_ANCHOR_VISIBILITY_PADDING = 24;
 const VIDEO_TOOLTIP_SIZE_SMALL = 'small';
 const VIDEO_TOOLTIP_SIZE_MEDIUM = 'medium';
 const VIDEO_TOOLTIP_SIZE_LARGE = 'large';
@@ -1069,6 +1070,8 @@ function handleHover(nodeId, screenX, screenY) {
       if (hoverAnchor) {
         positionHoverTooltip(primaryTooltipRef, hoverAnchor.x, hoverAnchor.y);
         showTooltipRef(primaryTooltipRef, 1);
+      } else {
+        hideTooltipRef(primaryTooltipRef);
       }
     }
     return;
@@ -1085,8 +1088,10 @@ function handleHover(nodeId, screenX, screenY) {
       const hoverAnchor = getHoverTooltipAnchor(nodeId, screenX, screenY);
       if (hoverAnchor) {
         positionHoverTooltip(primaryTooltipRef, hoverAnchor.x, hoverAnchor.y);
+        showTooltipRef(primaryTooltipRef, 1);
+      } else {
+        hideTooltipRef(primaryTooltipRef);
       }
-      showTooltipRef(primaryTooltipRef, 1);
     } else {
       hideTooltipRef(primaryTooltipRef);
     }
@@ -1098,10 +1103,34 @@ function handleHover(nodeId, screenX, screenY) {
   }
 }
 
+function isTooltipAnchorVisible(screenX, screenY, visibilityPadding = 0) {
+  if (!container) return false;
+  if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) {
+    return false;
+  }
+
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  if (width <= 0 || height <= 0) {
+    return false;
+  }
+
+  return (
+    screenX >= -visibilityPadding
+    && screenX <= width + visibilityPadding
+    && screenY >= -visibilityPadding
+    && screenY <= height + visibilityPadding
+  );
+}
+
 function getHoverTooltipAnchor(nodeId, fallbackX, fallbackY) {
   if (nodeId) {
     const projected = Renderer.projectToScreen(nodeId);
-    if (projected && !projected.behind) {
+    if (
+      projected
+      && !projected.behind
+      && isTooltipAnchorVisible(projected.x, projected.y, TOOLTIP_ANCHOR_VISIBILITY_PADDING)
+    ) {
       return {
         x: projected.x,
         y: projected.y,
@@ -1109,7 +1138,11 @@ function getHoverTooltipAnchor(nodeId, fallbackX, fallbackY) {
     }
   }
 
-  if (Number.isFinite(fallbackX) && Number.isFinite(fallbackY)) {
+  if (
+    Number.isFinite(fallbackX)
+    && Number.isFinite(fallbackY)
+    && isTooltipAnchorVisible(fallbackX, fallbackY, TOOLTIP_ANCHOR_VISIBILITY_PADDING)
+  ) {
     return {
       x: fallbackX,
       y: fallbackY,
@@ -1131,6 +1164,7 @@ function syncHoveredTooltipPosition() {
 
   const hoverAnchor = getHoverTooltipAnchor(hoveredNodeId);
   if (!hoverAnchor) {
+    hideTooltipRef(primaryTooltipRef);
     return;
   }
 
