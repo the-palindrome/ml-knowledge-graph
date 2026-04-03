@@ -31,7 +31,7 @@
       "nodeId": "gpt"
     },
     {
-      "at": 13.2,
+      "at": 15.9,
       "action": "closeTooltip",
       "nodeId": "gpt"
     },
@@ -44,43 +44,43 @@
       "easing": "ease-in-out"
     },
     {
-      "at": 13.2,
+      "at": 15.9,
       "action": "openTooltip",
       "nodeId": "causal language model"
     },
     {
-      "at": 18.7,
+      "at": 18.0,
       "action": "closeTooltip",
       "nodeId": "causal language model"
     },
     {
-      "at": 18.7,
+      "at": 17.6,
       "action": "cameraFocus",
       "nodeId": "pre-training",
       "distance": 210,
-      "duration": 3.0,
+      "duration": 1.4,
       "easing": "ease-in-out"
     },
     {
-      "at": 18.7,
+      "at": 18.0,
       "action": "openTooltip",
       "nodeId": "pre-training"
     },
     {
-      "at": 21.7,
+      "at": 19.5,
       "action": "closeTooltip",
       "nodeId": "pre-training"
     },
     {
-      "at": 21.7,
+      "at": 18.9,
       "action": "cameraFocus",
       "nodeId": "transformer",
       "distance": 210,
-      "duration": 3.3,
+      "duration": 1.8,
       "easing": "ease-in-out"
     },
     {
-      "at": 22.7,
+      "at": 19.5,
       "action": "openTooltip",
       "nodeId": "transformer"
     },
@@ -90,11 +90,11 @@
       "nodeId": "transformer"
     },
     {
-      "at": 25.0,
+      "at": 20.7,
       "action": "cameraFocus",
       "nodeId": "autoregressive model",
       "distance": 210,
-      "duration": 3.3,
+      "duration": 2.1,
       "easing": "ease-in-out"
     },
     {
@@ -108,11 +108,11 @@
       "nodeId": "autoregressive model"
     },
     {
-      "at": 28.3,
+      "at": 22.8,
       "action": "cameraFocus",
       "nodeId": "neural network",
       "distance": 210,
-      "duration": 2.4,
+      "duration": 1.8,
       "easing": "ease-in-out"
     },
     {
@@ -126,11 +126,11 @@
       "nodeId": "neural network"
     },
     {
-      "at": 30.7,
+      "at": 24.6,
       "action": "cameraFocus",
       "nodeId": "multi-head attention",
       "distance": 210,
-      "duration": 1.6,
+      "duration": 2.1,
       "easing": "ease-in-out"
     },
     {
@@ -144,11 +144,11 @@
       "nodeId": "multi-head attention"
     },
     {
-      "at": 32.3,
+      "at": 26.7,
       "action": "cameraFocus",
       "nodeId": "self-attention",
       "distance": 210,
-      "duration": 2.2,
+      "duration": 1.2,
       "easing": "ease-in-out"
     },
     {
@@ -162,15 +162,11 @@
       "nodeId": "self-attention"
     },
     {
-      "at": 35.0,
+      "at": 30.0,
       "action": "cameraFocus",
-      "target": [
-        0,
-        0,
-        0
-      ],
-      "distance": 1200,
-      "duration": 7.0,
+      "target": [0, 0, 0],
+      "distance": 1100,
+      "duration": 9.0,
       "easing": "ease-in-out"
     },
     {
@@ -183,33 +179,28 @@
       "easing": "linear"
     },
     {
-      "at": 42.0,
-      "action": "openTooltip",
-      "nodeId": "gpt"
-    },
-    {
-      "at": 50.0,
+      "at": 43.6,
       "action": "highlightCategory",
       "category": "Computer vision",
-      "duration": 1.5
+      "duration": 1.3
     },
     {
-      "at": 51.5,
+      "at": 44.9,
       "action": "highlightCategory",
       "category": "Natural language processing",
-      "duration": 2.0
+      "duration": 1.9
     },
     {
-      "at": 53.5,
+      "at": 46.8,
       "action": "highlightCategory",
       "category": "Probability theory and stochastic processes",
       "duration": 1.4
     },
     {
-      "at": 54.9,
+      "at": 48.2,
       "action": "highlightCategory",
       "category": "Linear and multilinear algebra; matrix theory",
-      "duration": 1.5
+      "duration": 1.6
     },
     {
       "at": 57.0,
@@ -218,11 +209,6 @@
     {
       "at": 57.0,
       "action": "revealGraph"
-    },
-    {
-      "at": 60.0,
-      "action": "closeTooltip",
-      "nodeId": "gpt"
     },
     {
       "at": 60.0,
@@ -249,11 +235,7 @@
     {
       "at": 71.0,
       "action": "cameraFocus",
-      "target": [
-        0,
-        520,
-        0
-      ],
+      "target": [0, 520, 0],
       "distance": 1200,
       "duration": 3.0,
       "windUp": 0.5,
@@ -288,11 +270,7 @@
     {
       "at": 80.0,
       "action": "cameraFocus",
-      "target": [
-        0,
-        -360,
-        0
-      ],
+      "target": [0, -360, 0],
       "distance": 1200,
       "duration": 6.0,
       "windUp": 0.5,
@@ -480,11 +458,7 @@
     {
       "at": 163.0,
       "action": "cameraFocus",
-      "target": [
-        0,
-        0,
-        0
-      ],
+      "target": [0, 0, 0],
       "distance": 1400,
       "duration": 11.0,
       "easing": "ease-in-out"
@@ -1475,11 +1449,7 @@
     {
       "at": 483.0,
       "action": "cameraFocus",
-      "target": [
-        0,
-        0,
-        0
-      ],
+      "target": [0, 0, 0],
       "distance": 1400,
       "duration": 7.0,
       "easing": "ease-in-out"

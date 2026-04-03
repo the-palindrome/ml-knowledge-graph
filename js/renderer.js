@@ -78,6 +78,9 @@ const EDGE_CURVE_STRENGTH_BASE = 0.14;
 const EDGE_CURVE_STRENGTH_VARIANCE = 0.1;
 const EDGE_CURVE_MAX_BEND = 50;
 const EDGE_LINE_WIDTH = 0.85;
+const DEFAULT_HIGHLIGHT_EDGE_OPACITY = 0.6;
+const HIGHLIGHT_EDGE_DYNAMIC_ALPHA_REFERENCE_COUNT = 90;
+const HIGHLIGHT_EDGE_DYNAMIC_ALPHA_MIN_FACTOR = 0.2;
 const DEFAULT_MAX_PIXEL_RATIO = 2.0;
 const ANIMATION_PIXEL_RATIO = 1.0;
 const DEFAULT_NODE_GEOMETRY_DETAIL = { widthSegments: 32, heightSegments: 24 };
@@ -148,6 +151,35 @@ vec4 diffuseColor = vec4( diffuse, opacity );`,
 
 function smootherStep(t) {
   return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function clamp01(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(Math.max(value, 0), 1);
+}
+
+function resolveHighlightOpacity(baseOpacity, highlightedEdgeCount, useDynamicOpacity = false) {
+  const resolvedBaseOpacity = clamp01(
+    Number.isFinite(baseOpacity) ? baseOpacity : DEFAULT_HIGHLIGHT_EDGE_OPACITY,
+  );
+
+  if (!useDynamicOpacity) {
+    return resolvedBaseOpacity;
+  }
+
+  if (
+    !Number.isFinite(highlightedEdgeCount)
+    || highlightedEdgeCount <= HIGHLIGHT_EDGE_DYNAMIC_ALPHA_REFERENCE_COUNT
+  ) {
+    return resolvedBaseOpacity;
+  }
+
+  const densityRatio = highlightedEdgeCount / HIGHLIGHT_EDGE_DYNAMIC_ALPHA_REFERENCE_COUNT;
+  const densityScale = Math.max(
+    HIGHLIGHT_EDGE_DYNAMIC_ALPHA_MIN_FACTOR,
+    1 / Math.sqrt(densityRatio),
+  );
+  return resolvedBaseOpacity * densityScale;
 }
 
 function initializeNodeVisualState(nodeCount) {
@@ -875,15 +907,36 @@ export function showHighlightEdgeGroups(groups) {
   clearHighlightEdges();
   if (!groups || groups.length === 0) return;
 
+  const preparedGroups = [];
+  let dynamicHighlightedEdgeCount = 0;
+
   for (const group of groups) {
     if (!group?.nodeSet || group.nodeSet.size === 0) continue;
     const pairs = collectPairsForNodeSet(group.nodeSet);
     if (pairs.length === 0) continue;
-    const layer = createHighlightLayer(
+    const useDynamicOpacity = Boolean(group.dynamicOpacity);
+    preparedGroups.push({
       pairs,
+      colorHex: group.colorHex,
+      linewidth: group.linewidth,
+      opacity: group.opacity,
+      dynamicOpacity: useDynamicOpacity,
+    });
+    if (useDynamicOpacity) {
+      dynamicHighlightedEdgeCount += pairs.length;
+    }
+  }
+
+  for (const group of preparedGroups) {
+    const layer = createHighlightLayer(
+      group.pairs,
       group.colorHex,
       group.linewidth,
       group.opacity,
+      {
+        dynamicOpacity: group.dynamicOpacity,
+        highlightedEdgeCount: dynamicHighlightedEdgeCount,
+      },
     );
     highlightLayers.push(layer);
   }
@@ -910,8 +963,19 @@ function createHighlightLayer(
   pairs,
   colorHex,
   linewidth = EDGE_LINE_WIDTH,
-  opacity = 0.6,
+  opacity = DEFAULT_HIGHLIGHT_EDGE_OPACITY,
+  options = {},
 ) {
+  const {
+    dynamicOpacity = false,
+    highlightedEdgeCount = pairs.length,
+  } = options;
+  const resolvedOpacity = resolveHighlightOpacity(
+    opacity,
+    highlightedEdgeCount,
+    dynamicOpacity,
+  );
+
   const positions = new Float32Array(pairs.length * DEFAULT_EDGE_CURVE_SEGMENTS * 6);
   fillEdgePositions(pairs, positions);
   const geo = new LineSegmentsGeometry();
@@ -921,7 +985,7 @@ function createHighlightLayer(
     color: new THREE.Color(colorHex),
     linewidth,
     transparent: true,
-    opacity,
+    opacity: resolvedOpacity,
     depthTest: true,
     depthWrite: false,
     resolution: new THREE.Vector2(
@@ -953,7 +1017,7 @@ function createHighlightLayer(
   const coneMat = new THREE.MeshBasicMaterial({
     color: new THREE.Color(colorHex),
     transparent: true,
-    opacity: 0.6,
+    opacity: resolvedOpacity,
     depthWrite: false,
   });
 

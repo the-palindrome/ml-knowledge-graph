@@ -785,6 +785,7 @@ function buildContextVideoVisualStyle(selectionContext, {
       nodeSet: dependentSet,
       colorHex: DEPENDENTS_EDGE_COLOR,
       opacity: 0.6,
+      dynamicOpacity: true,
     });
   }
 
@@ -828,6 +829,7 @@ function serializeVideoEdgeGroupKey(edgeGroup) {
   return [
     edgeGroup.colorHex ?? '',
     edgeGroup.linewidth ?? '',
+    edgeGroup.dynamicOpacity ? 'dynamic' : 'fixed',
     [...(edgeGroup.nodeSet ?? [])].sort().join(','),
   ].join('|');
 }
@@ -852,6 +854,7 @@ function accumulateVideoEdgeGroups(groupMap, groups, factor) {
       colorHex: group.colorHex,
       linewidth: group.linewidth,
       opacity,
+      dynamicOpacity: Boolean(group.dynamicOpacity),
     });
   }
 }
@@ -1690,7 +1693,11 @@ function applySelectionHighlight(selectionContext, options = {}) {
     edgeGroups.push({ nodeSet: prerequisiteSet, colorHex: PREREQUISITES_EDGE_COLOR });
   }
   if (pathHighlightState.showDependents) {
-    edgeGroups.push({ nodeSet: dependentSet, colorHex: DEPENDENTS_EDGE_COLOR });
+    edgeGroups.push({
+      nodeSet: dependentSet,
+      colorHex: DEPENDENTS_EDGE_COLOR,
+      dynamicOpacity: true,
+    });
   }
 
   Renderer.updateColors(colorMap);
