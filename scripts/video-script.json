@@ -1,0 +1,1498 @@
+{
+  "script": [
+    {
+      "at": 0.0,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.03,
+      "duration": 9.3,
+      "windDown": 2.0,
+      "easing": "linear"
+    },
+    {
+      "at": 9.3,
+      "action": "selectNode",
+      "nodeId": "gpt",
+      "showPrerequisites": true,
+      "showDependents": false,
+      "duration": 2.0
+    },
+    {
+      "at": 9.3,
+      "action": "cameraFocus",
+      "nodeId": "gpt",
+      "distance": 210,
+      "duration": 2.2,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 10.0,
+      "action": "openTooltip",
+      "nodeId": "gpt"
+    },
+    {
+      "at": 13.2,
+      "action": "closeTooltip",
+      "nodeId": "gpt"
+    },
+    {
+      "at": 13.2,
+      "action": "cameraFocus",
+      "nodeId": "causal language model",
+      "distance": 210,
+      "duration": 2.7,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 13.2,
+      "action": "openTooltip",
+      "nodeId": "causal language model"
+    },
+    {
+      "at": 18.7,
+      "action": "closeTooltip",
+      "nodeId": "causal language model"
+    },
+    {
+      "at": 18.7,
+      "action": "cameraFocus",
+      "nodeId": "pre-training",
+      "distance": 210,
+      "duration": 3.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 18.7,
+      "action": "openTooltip",
+      "nodeId": "pre-training"
+    },
+    {
+      "at": 21.7,
+      "action": "closeTooltip",
+      "nodeId": "pre-training"
+    },
+    {
+      "at": 21.7,
+      "action": "cameraFocus",
+      "nodeId": "transformer",
+      "distance": 210,
+      "duration": 3.3,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 22.7,
+      "action": "openTooltip",
+      "nodeId": "transformer"
+    },
+    {
+      "at": 25.0,
+      "action": "closeTooltip",
+      "nodeId": "transformer"
+    },
+    {
+      "at": 25.0,
+      "action": "cameraFocus",
+      "nodeId": "autoregressive model",
+      "distance": 210,
+      "duration": 3.3,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 25.0,
+      "action": "openTooltip",
+      "nodeId": "autoregressive model"
+    },
+    {
+      "at": 28.3,
+      "action": "closeTooltip",
+      "nodeId": "autoregressive model"
+    },
+    {
+      "at": 28.3,
+      "action": "cameraFocus",
+      "nodeId": "neural network",
+      "distance": 210,
+      "duration": 2.4,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 28.5,
+      "action": "openTooltip",
+      "nodeId": "neural network"
+    },
+    {
+      "at": 30.0,
+      "action": "closeTooltip",
+      "nodeId": "neural network"
+    },
+    {
+      "at": 30.7,
+      "action": "cameraFocus",
+      "nodeId": "multi-head attention",
+      "distance": 210,
+      "duration": 1.6,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 30.8,
+      "action": "openTooltip",
+      "nodeId": "multi-head attention"
+    },
+    {
+      "at": 32.3,
+      "action": "closeTooltip",
+      "nodeId": "multi-head attention"
+    },
+    {
+      "at": 32.3,
+      "action": "cameraFocus",
+      "nodeId": "self-attention",
+      "distance": 210,
+      "duration": 2.2,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 32.5,
+      "action": "openTooltip",
+      "nodeId": "self-attention"
+    },
+    {
+      "at": 35.0,
+      "action": "closeTooltip",
+      "nodeId": "self-attention"
+    },
+    {
+      "at": 35.0,
+      "action": "cameraFocus",
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "distance": 1200,
+      "duration": 7.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 42.0,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.03,
+      "duration": 18.0,
+      "windDown": 3.0,
+      "easing": "linear"
+    },
+    {
+      "at": 42.0,
+      "action": "openTooltip",
+      "nodeId": "gpt"
+    },
+    {
+      "at": 50.0,
+      "action": "highlightCategory",
+      "category": "Computer vision",
+      "duration": 1.5
+    },
+    {
+      "at": 51.5,
+      "action": "highlightCategory",
+      "category": "Natural language processing",
+      "duration": 2.0
+    },
+    {
+      "at": 53.5,
+      "action": "highlightCategory",
+      "category": "Probability theory and stochastic processes",
+      "duration": 1.4
+    },
+    {
+      "at": 54.9,
+      "action": "highlightCategory",
+      "category": "Linear and multilinear algebra; matrix theory",
+      "duration": 1.5
+    },
+    {
+      "at": 57.0,
+      "action": "unselectNode"
+    },
+    {
+      "at": 57.0,
+      "action": "revealGraph"
+    },
+    {
+      "at": 60.0,
+      "action": "closeTooltip",
+      "nodeId": "gpt"
+    },
+    {
+      "at": 60.0,
+      "action": "changeLayout",
+      "layout": "hierarchical",
+      "duration": 7.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 67.0,
+      "action": "focusNode",
+      "nodeId": "gradient descent",
+      "showPrerequisites": true,
+      "showDependents": true,
+      "distance": 360,
+      "duration": 3.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 68.0,
+      "action": "openTooltip",
+      "nodeId": "gradient descent"
+    },
+    {
+      "at": 71.0,
+      "action": "cameraFocus",
+      "target": [
+        0,
+        520,
+        0
+      ],
+      "distance": 1200,
+      "duration": 3.0,
+      "windUp": 0.5,
+      "windDown": 0.5,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 73.0,
+      "action": "openTooltip",
+      "nodeId": "loss function"
+    },
+    {
+      "at": 74.0,
+      "action": "openTooltip",
+      "nodeId": "model"
+    },
+    {
+      "at": 75.0,
+      "action": "openTooltip",
+      "nodeId": "data"
+    },
+    {
+      "at": 76.0,
+      "action": "openTooltip",
+      "nodeId": "distance"
+    },
+    {
+      "at": 77.0,
+      "action": "openTooltip",
+      "nodeId": "set"
+    },
+    {
+      "at": 80.0,
+      "action": "cameraFocus",
+      "target": [
+        0,
+        -360,
+        0
+      ],
+      "distance": 1200,
+      "duration": 6.0,
+      "windUp": 0.5,
+      "windDown": 0.5,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 83.0,
+      "action": "openTooltip",
+      "nodeId": "few-shot learning"
+    },
+    {
+      "at": 84.0,
+      "action": "openTooltip",
+      "nodeId": "lstm"
+    },
+    {
+      "at": 85.0,
+      "action": "openTooltip",
+      "nodeId": "gpt"
+    },
+    {
+      "at": 86.0,
+      "action": "openTooltip",
+      "nodeId": "bert"
+    },
+    {
+      "at": 87.0,
+      "action": "openTooltip",
+      "nodeId": "diffusion model"
+    },
+    {
+      "at": 90.0,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 90.0,
+      "action": "zoomTo",
+      "distance": 1600,
+      "duration": 5.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 95.0,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.03,
+      "duration": 22.0,
+      "windUp": 3.0,
+      "windDown": 3.0,
+      "easing": "linear"
+    },
+    {
+      "at": 117.0,
+      "action": "selectNode",
+      "nodeId": "derivative",
+      "showPrerequisites": true,
+      "showDependents": true,
+      "duration": 2.0
+    },
+    {
+      "at": 117.0,
+      "action": "openTooltip",
+      "nodeId": "derivative"
+    },
+    {
+      "at": 117.0,
+      "action": "cameraFocus",
+      "nodeId": "derivative",
+      "distance": 340,
+      "duration": 6.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 132.0,
+      "action": "cameraFocus",
+      "nodeId": "real numbers",
+      "distance": 300,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 134.0,
+      "action": "openTooltip",
+      "nodeId": "real numbers"
+    },
+    {
+      "at": 135.0,
+      "action": "cameraFocus",
+      "nodeId": "completeness",
+      "distance": 300,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 137.0,
+      "action": "openTooltip",
+      "nodeId": "completeness"
+    },
+    {
+      "at": 138.0,
+      "action": "cameraFocus",
+      "nodeId": "convergence",
+      "distance": 300,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 140.0,
+      "action": "openTooltip",
+      "nodeId": "convergence"
+    },
+    {
+      "at": 141.0,
+      "action": "cameraFocus",
+      "nodeId": "limit",
+      "distance": 300,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 143.0,
+      "action": "openTooltip",
+      "nodeId": "limit"
+    },
+    {
+      "at": 147.0,
+      "action": "cameraFocus",
+      "nodeId": "derivative",
+      "distance": 320,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 150.0,
+      "action": "cameraFocus",
+      "nodeId": "chain rule",
+      "distance": 300,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 152.0,
+      "action": "openTooltip",
+      "nodeId": "chain rule"
+    },
+    {
+      "at": 153.0,
+      "action": "cameraFocus",
+      "nodeId": "tangent space",
+      "distance": 300,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 155.0,
+      "action": "openTooltip",
+      "nodeId": "tangent space"
+    },
+    {
+      "at": 156.0,
+      "action": "cameraFocus",
+      "nodeId": "taylor expansion",
+      "distance": 300,
+      "duration": 1.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 157.0,
+      "action": "openTooltip",
+      "nodeId": "taylor expansion"
+    },
+    {
+      "at": 160.0,
+      "action": "cameraFocus",
+      "nodeId": "derivative",
+      "distance": 320,
+      "duration": 3.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 163.0,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 163.0,
+      "action": "cameraFocus",
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "distance": 1400,
+      "duration": 11.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 170.0,
+      "action": "unselectNode",
+      "nodeId": "derivative",
+      "duration": 4.0
+    },
+    {
+      "at": 174.0,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.03,
+      "duration": 11.0,
+      "windUp": 2.0,
+      "easing": "linear"
+    },
+    {
+      "at": 185.0,
+      "action": "changeLayout",
+      "layout": "force",
+      "duration": 5.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 195.0,
+      "action": "selectNode",
+      "nodeId": "gpt",
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0,
+      "duration": 5.0
+    },
+    {
+      "at": 199.0,
+      "action": "selectNode",
+      "nodeId": "catboost",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 199.0,
+      "action": "openTooltip",
+      "nodeId": "catboost"
+    },
+    {
+      "at": 200.0,
+      "action": "selectNode",
+      "nodeId": "resnet",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 200.0,
+      "action": "openTooltip",
+      "nodeId": "resnet"
+    },
+    {
+      "at": 207.0,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "causal language model",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "pre-training",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "gradient boosting",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "target encoding",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "oblivious decision tree",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "convolutional neural network",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "residual connection",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "batch normalization",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "rectified linear unit",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 235.0,
+      "action": "selectNode",
+      "nodeId": "identity mapping",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 240.0,
+      "action": "highlightUpperSlice",
+      "from": 20
+    },
+    {
+      "at": 241.2,
+      "action": "highlightUpperSlice",
+      "from": 17
+    },
+    {
+      "at": 242.4,
+      "action": "highlightUpperSlice",
+      "from": 14
+    },
+    {
+      "at": 243.6,
+      "action": "highlightUpperSlice",
+      "from": 11
+    },
+    {
+      "at": 244.8,
+      "action": "highlightUpperSlice",
+      "from": 8
+    },
+    {
+      "at": 246.0,
+      "action": "highlightUpperSlice",
+      "from": 5
+    },
+    {
+      "at": 247.0,
+      "action": "highlightUpperSlice",
+      "from": 0
+    },
+    {
+      "at": 247.4,
+      "action": "openTooltip",
+      "nodeId": "logical implication"
+    },
+    {
+      "at": 248.8,
+      "action": "openTooltip",
+      "nodeId": "set"
+    },
+    {
+      "at": 249.0,
+      "action": "openTooltip",
+      "nodeId": "element"
+    },
+    {
+      "at": 254.0,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 258.0,
+      "action": "unselectNode",
+      "duration": 5.0
+    },
+    {
+      "at": 270.0,
+      "action": "hideGraph",
+      "duration": 2.0
+    },
+    {
+      "at": 274.0,
+      "action": "changeLayout",
+      "layout": "hierarchical",
+      "duration": 0.3,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 275.0,
+      "action": "cameraFocus",
+      "nodeId": "logical implication",
+      "distance": 260,
+      "duration": 5.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 280.0,
+      "action": "selectNode",
+      "nodeId": "logical implication",
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 280.0,
+      "action": "openTooltip",
+      "nodeId": "logical implication"
+    },
+    {
+      "at": 282.0,
+      "action": "selectNode",
+      "nodeId": "logical conjunction",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 282.0,
+      "action": "openTooltip",
+      "nodeId": "logical conjunction"
+    },
+    {
+      "at": 282.0,
+      "action": "closeTooltip",
+      "nodeId": "logical implication"
+    },
+    {
+      "at": 284.0,
+      "action": "selectNode",
+      "nodeId": "set",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 284.0,
+      "action": "openTooltip",
+      "nodeId": "set"
+    },
+    {
+      "at": 284.0,
+      "action": "closeTooltip",
+      "nodeId": "logical conjunction"
+    },
+    {
+      "at": 286.0,
+      "action": "selectNode",
+      "nodeId": "element",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 286.0,
+      "action": "openTooltip",
+      "nodeId": "element"
+    },
+    {
+      "at": 286.0,
+      "action": "closeTooltip",
+      "nodeId": "set"
+    },
+    {
+      "at": 288.0,
+      "action": "selectNode",
+      "nodeId": "equality",
+      "appendToSelection": true,
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 288.0,
+      "action": "openTooltip",
+      "nodeId": "equality"
+    },
+    {
+      "at": 288.0,
+      "action": "closeTooltip",
+      "nodeId": "element"
+    },
+    {
+      "at": 290.0,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 293.0,
+      "action": "cameraFocus",
+      "nodeId": "subset",
+      "distance": 280,
+      "duration": 4.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 297.0,
+      "action": "highlightDepthEdges",
+      "from": 0,
+      "to": 1
+    },
+    {
+      "at": 300.5,
+      "action": "openTooltip",
+      "nodeId": "subset"
+    },
+    {
+      "at": 302.5,
+      "action": "closeTooltip",
+      "nodeId": "subset"
+    },
+    {
+      "at": 302.5,
+      "action": "openTooltip",
+      "nodeId": "set intersection"
+    },
+    {
+      "at": 304.5,
+      "action": "closeTooltip",
+      "nodeId": "set intersection"
+    },
+    {
+      "at": 304.5,
+      "action": "openTooltip",
+      "nodeId": "natural numbers"
+    },
+    {
+      "at": 306.5,
+      "action": "closeTooltip",
+      "nodeId": "natural numbers"
+    },
+    {
+      "at": 306.5,
+      "action": "openTooltip",
+      "nodeId": "ordered pair"
+    },
+    {
+      "at": 308.5,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 310.0,
+      "action": "cameraFocus",
+      "nodeId": "logical implication",
+      "distance": 320,
+      "duration": 20.0,
+      "easing": "ease-in"
+    },
+    {
+      "at": 310.0,
+      "action": "highlightLowerSlice",
+      "to": 3
+    },
+    {
+      "at": 312.0,
+      "action": "highlightLowerSlice",
+      "to": 6
+    },
+    {
+      "at": 314.0,
+      "action": "highlightLowerSlice",
+      "to": 9
+    },
+    {
+      "at": 316.0,
+      "action": "highlightLowerSlice",
+      "to": 12
+    },
+    {
+      "at": 318.0,
+      "action": "highlightLowerSlice",
+      "to": 16
+    },
+    {
+      "at": 320.0,
+      "action": "highlightLowerSlice",
+      "to": 20
+    },
+    {
+      "at": 322.0,
+      "action": "highlightLowerSlice",
+      "to": 24
+    },
+    {
+      "at": 324.0,
+      "action": "highlightLowerSlice",
+      "to": 28
+    },
+    {
+      "at": 326.0,
+      "action": "highlightLowerSlice",
+      "to": 32
+    },
+    {
+      "at": 328.0,
+      "action": "highlightLowerSlice",
+      "to": 36
+    },
+    {
+      "at": 330.0,
+      "action": "zoomTo",
+      "distance": 1600,
+      "duration": 5.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 335.0,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.03,
+      "duration": 6.0,
+      "windUp": 5.0,
+      "easing": "linear"
+    },
+    {
+      "at": 341.0,
+      "action": "selectNode",
+      "nodeId": "gradient descent",
+      "showPrerequisites": false,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 341.0,
+      "action": "openTooltip",
+      "nodeId": "gradient descent"
+    },
+    {
+      "at": 341.0,
+      "action": "cameraFocus",
+      "nodeId": "gradient descent",
+      "distance": 260,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 343.0,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.03,
+      "duration": 63.0,
+      "windDown": 5.0,
+      "easing": "linear"
+    },
+    {
+      "at": 348.0,
+      "action": "selectNode",
+      "nodeId": "gradient descent",
+      "showPrerequisites": true,
+      "showDependents": false,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 349.0,
+      "action": "selectNode",
+      "nodeId": "gradient descent",
+      "showPrerequisites": true,
+      "showDependents": true,
+      "nonFocusOpacity": 0.0
+    },
+    {
+      "at": 352.0,
+      "action": "openTooltip",
+      "nodeId": "gradient"
+    },
+    {
+      "at": 353.0,
+      "action": "openTooltip",
+      "nodeId": "loss function"
+    },
+    {
+      "at": 354.0,
+      "action": "openTooltip",
+      "nodeId": "vector"
+    },
+    {
+      "at": 355.0,
+      "action": "openTooltip",
+      "nodeId": "training data"
+    },
+    {
+      "at": 356.0,
+      "action": "closeTooltip",
+      "nodeId": "gradient"
+    },
+    {
+      "at": 356.0,
+      "action": "closeTooltip",
+      "nodeId": "loss function"
+    },
+    {
+      "at": 356.0,
+      "action": "closeTooltip",
+      "nodeId": "vector"
+    },
+    {
+      "at": 356.0,
+      "action": "closeTooltip",
+      "nodeId": "training data"
+    },
+    {
+      "at": 357.0,
+      "action": "openTooltip",
+      "nodeId": "neural network"
+    },
+    {
+      "at": 358.0,
+      "action": "openTooltip",
+      "nodeId": "resnet"
+    },
+    {
+      "at": 359.0,
+      "action": "openTooltip",
+      "nodeId": "transformer"
+    },
+    {
+      "at": 360.0,
+      "action": "openTooltip",
+      "nodeId": "gpt"
+    },
+    {
+      "at": 361.0,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 366.0,
+      "action": "unselectNode",
+      "nodeId": "gradient descent",
+      "duration": 5.0
+    },
+    {
+      "at": 412.0,
+      "action": "changeNodeSizeMode",
+      "mode": "_betweenness_centrality",
+      "duration": 6.0
+    },
+    {
+      "at": 422.0,
+      "action": "selectNode",
+      "nodeId": "neural network",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 422.0,
+      "action": "openTooltip",
+      "nodeId": "neural network"
+    },
+    {
+      "at": 424.0,
+      "action": "unselectNode",
+      "nodeId": "neural network"
+    },
+    {
+      "at": 424.0,
+      "action": "closeTooltip",
+      "nodeId": "neural network"
+    },
+    {
+      "at": 424.0,
+      "action": "selectNode",
+      "nodeId": "real numbers",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 424.0,
+      "action": "openTooltip",
+      "nodeId": "real numbers"
+    },
+    {
+      "at": 426.0,
+      "action": "unselectNode",
+      "nodeId": "real numbers"
+    },
+    {
+      "at": 426.0,
+      "action": "closeTooltip",
+      "nodeId": "real numbers"
+    },
+    {
+      "at": 426.0,
+      "action": "selectNode",
+      "nodeId": "completeness",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 426.0,
+      "action": "openTooltip",
+      "nodeId": "completeness"
+    },
+    {
+      "at": 428.5,
+      "action": "unselectNode",
+      "nodeId": "completeness"
+    },
+    {
+      "at": 428.5,
+      "action": "closeTooltip",
+      "nodeId": "completeness"
+    },
+    {
+      "at": 428.5,
+      "action": "selectNode",
+      "nodeId": "convergence",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 428.5,
+      "action": "openTooltip",
+      "nodeId": "convergence"
+    },
+    {
+      "at": 430.5,
+      "action": "unselectNode",
+      "nodeId": "convergence"
+    },
+    {
+      "at": 430.5,
+      "action": "closeTooltip",
+      "nodeId": "convergence"
+    },
+    {
+      "at": 430.5,
+      "action": "selectNode",
+      "nodeId": "backpropagation",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 430.5,
+      "action": "openTooltip",
+      "nodeId": "backpropagation"
+    },
+    {
+      "at": 433.0,
+      "action": "unselectNode",
+      "nodeId": "backpropagation"
+    },
+    {
+      "at": 433.0,
+      "action": "closeTooltip",
+      "nodeId": "backpropagation"
+    },
+    {
+      "at": 433.0,
+      "action": "selectNode",
+      "nodeId": "limit",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 433.0,
+      "action": "openTooltip",
+      "nodeId": "limit"
+    },
+    {
+      "at": 435.0,
+      "action": "unselectNode",
+      "nodeId": "limit"
+    },
+    {
+      "at": 435.0,
+      "action": "closeTooltip",
+      "nodeId": "limit"
+    },
+    {
+      "at": 435.0,
+      "action": "selectNode",
+      "nodeId": "gradient descent",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 435.0,
+      "action": "openTooltip",
+      "nodeId": "gradient descent"
+    },
+    {
+      "at": 437.0,
+      "action": "unselectNode",
+      "nodeId": "gradient descent"
+    },
+    {
+      "at": 437.0,
+      "action": "closeTooltip",
+      "nodeId": "gradient descent"
+    },
+    {
+      "at": 437.0,
+      "action": "selectNode",
+      "nodeId": "absolute value",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 437.0,
+      "action": "openTooltip",
+      "nodeId": "absolute value"
+    },
+    {
+      "at": 439.0,
+      "action": "unselectNode",
+      "nodeId": "absolute value"
+    },
+    {
+      "at": 439.0,
+      "action": "closeTooltip",
+      "nodeId": "absolute value"
+    },
+    {
+      "at": 439.0,
+      "action": "selectNode",
+      "nodeId": "distance",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 439.0,
+      "action": "openTooltip",
+      "nodeId": "distance"
+    },
+    {
+      "at": 441.0,
+      "action": "unselectNode",
+      "nodeId": "distance"
+    },
+    {
+      "at": 441.0,
+      "action": "closeTooltip",
+      "nodeId": "distance"
+    },
+    {
+      "at": 441.0,
+      "action": "selectNode",
+      "nodeId": "function",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 441.0,
+      "action": "openTooltip",
+      "nodeId": "function"
+    },
+    {
+      "at": 443.0,
+      "action": "unselectNode",
+      "nodeId": "function"
+    },
+    {
+      "at": 443.0,
+      "action": "closeTooltip",
+      "nodeId": "function"
+    },
+    {
+      "at": 443.0,
+      "action": "selectNode",
+      "nodeId": "matrix",
+      "showPrerequisites": true,
+      "showDependents": true
+    },
+    {
+      "at": 443.0,
+      "action": "openTooltip",
+      "nodeId": "matrix"
+    },
+    {
+      "at": 445.0,
+      "action": "unselectNode",
+      "nodeId": "matrix"
+    },
+    {
+      "at": 445.0,
+      "action": "closeTooltip",
+      "nodeId": "matrix"
+    },
+    {
+      "at": 446.0,
+      "action": "selectNode",
+      "nodeId": "convergence",
+      "showPrerequisites": false,
+      "showDependents": false
+    },
+    {
+      "at": 446.0,
+      "action": "cameraFocus",
+      "nodeId": "convergence",
+      "distance": 420,
+      "duration": 4.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 454.0,
+      "action": "openTooltip",
+      "nodeId": "real numbers"
+    },
+    {
+      "at": 455.0,
+      "action": "openTooltip",
+      "nodeId": "completeness"
+    },
+    {
+      "at": 456.0,
+      "action": "openTooltip",
+      "nodeId": "convergence"
+    },
+    {
+      "at": 457.0,
+      "action": "openTooltip",
+      "nodeId": "limit"
+    },
+    {
+      "at": 458.0,
+      "action": "openTooltip",
+      "nodeId": "distance"
+    },
+    {
+      "at": 459.0,
+      "action": "openTooltip",
+      "nodeId": "triangle inequality"
+    },
+    {
+      "at": 460.0,
+      "action": "openTooltip",
+      "nodeId": "inequality"
+    },
+    {
+      "at": 461.0,
+      "action": "openTooltip",
+      "nodeId": "sequence"
+    },
+    {
+      "at": 465.0,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 465.0,
+      "action": "unselectNode",
+      "nodeId": "convergence"
+    },
+    {
+      "at": 469.5,
+      "action": "focusNode",
+      "nodeId": "resnet",
+      "showPrerequisites": true,
+      "showDependents": false,
+      "distance": 240,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 469.5,
+      "action": "openTooltip",
+      "nodeId": "resnet"
+    },
+    {
+      "at": 471.5,
+      "action": "cameraFocus",
+      "nodeId": "batch normalization",
+      "distance": 240,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 471.5,
+      "action": "openTooltip",
+      "nodeId": "batch normalization"
+    },
+    {
+      "at": 473.5,
+      "action": "cameraFocus",
+      "nodeId": "variance",
+      "distance": 240,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 473.5,
+      "action": "openTooltip",
+      "nodeId": "variance"
+    },
+    {
+      "at": 475.5,
+      "action": "cameraFocus",
+      "nodeId": "expected value",
+      "distance": 240,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 475.5,
+      "action": "openTooltip",
+      "nodeId": "expected value"
+    },
+    {
+      "at": 477.5,
+      "action": "cameraFocus",
+      "nodeId": "random variable",
+      "distance": 240,
+      "duration": 2.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 477.5,
+      "action": "openTooltip",
+      "nodeId": "random variable"
+    },
+    {
+      "at": 479.5,
+      "action": "cameraFocus",
+      "nodeId": "probability",
+      "distance": 240,
+      "duration": 3.5,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 479.5,
+      "action": "openTooltip",
+      "nodeId": "probability"
+    },
+    {
+      "at": 483.0,
+      "action": "closeAllTooltips"
+    },
+    {
+      "at": 483.0,
+      "action": "unselectNode",
+      "nodeId": "resnet"
+    },
+    {
+      "at": 483.0,
+      "action": "selectNode",
+      "nodeId": "hidden state",
+      "showPrerequisites": false,
+      "showDependents": false
+    },
+    {
+      "at": 483.0,
+      "action": "changeLayout",
+      "layout": "force",
+      "duration": 7.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 483.0,
+      "action": "cameraFocus",
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "distance": 1400,
+      "duration": 7.0,
+      "easing": "ease-in-out"
+    },
+    {
+      "at": 490.0,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.03,
+      "duration": 40.0,
+      "windUp": 5.0,
+      "windDown": 5.0,
+      "easing": "linear"
+    }
+  ]
+}

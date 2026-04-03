@@ -8,7 +8,7 @@ sandbox_mode = "workspace-write"
 approval_policy = "never"
 
 # Default: keep network off in the sandbox (flip to true if you really need it)
-sandbox_workspace_write.network_access = false
+sandbox_workspace_write.network_access = true
 
 # Keep the environment "boring" and predictable when Codex runs commands
 [shell_environment_policy]
