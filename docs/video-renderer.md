@@ -222,7 +222,7 @@ Required:
 Optional:
 
 - all selection options from `selectNode`
-- `duration` (default `1.2`)
+- `duration` (default `1.2`): applies to both camera movement and node/edge highlight transitions
 - `easing` (default `smooth`)
 - `distance` (number > 0): optional camera distance from focused target
 

@@ -3144,8 +3144,7 @@ function applyVideoActionAtTime(state, action, timelineTime) {
       applyVideoUnselectTransitionState(state, action, progress);
       break;
     case 'focusNode':
-      applyVideoSelectState(state, action);
-      state.visualStyle = buildVideoVisualStyleForState(state);
+      applyVideoSelectTransitionState(state, action, progress);
       applyVideoFocusCamera(state, action, cameraProgress);
       break;
     case 'cameraFocus':

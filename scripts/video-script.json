@@ -227,17 +227,10 @@
     },
     {
       "at": 61.0,
-      "action": "selectNode",
+      "action": "focusNode",
       "nodeId": "gradient descent",
       "showPrerequisites": true,
       "showDependents": true,
-      "duration": 3.0,
-      "easing": "ease-in-out"
-    },
-    {
-      "at": 61.0,
-      "action": "focusNode",
-      "nodeId": "gradient descent",
       "distance": 360,
       "duration": 3.0,
       "easing": "ease-in-out"
@@ -1097,6 +1090,16 @@
       "distance": 1400,
       "duration": 3.0,
       "easing": "ease-in-out"
+    },
+    {
+      "at": 360.4,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.01,
+      "duration": 25.0,
+      "windDown": 1.0,
+      "windUp": 1.0,
+      "easing": "linear"
     },
     {
       "at": 363.4,
