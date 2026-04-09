@@ -85,7 +85,7 @@
       "nodeId": "transformer"
     },
     {
-      "at": 25.0,
+      "at": 20.7,
       "action": "closeTooltip",
       "nodeId": "transformer"
     },
@@ -98,12 +98,12 @@
       "easing": "ease-in-out"
     },
     {
-      "at": 25.0,
+      "at": 21.0,
       "action": "openTooltip",
       "nodeId": "autoregressive model"
     },
     {
-      "at": 28.3,
+      "at": 22.8,
       "action": "closeTooltip",
       "nodeId": "autoregressive model"
     },
@@ -116,12 +116,12 @@
       "easing": "ease-in-out"
     },
     {
-      "at": 28.5,
+      "at": 22.8,
       "action": "openTooltip",
       "nodeId": "neural network"
     },
     {
-      "at": 30.0,
+      "at": 24.6,
       "action": "closeTooltip",
       "nodeId": "neural network"
     },
@@ -134,12 +134,12 @@
       "easing": "ease-in-out"
     },
     {
-      "at": 30.8,
+      "at": 24.6,
       "action": "openTooltip",
       "nodeId": "multi-head attention"
     },
     {
-      "at": 32.3,
+      "at": 26.7,
       "action": "closeTooltip",
       "nodeId": "multi-head attention"
     },
@@ -152,12 +152,12 @@
       "easing": "ease-in-out"
     },
     {
-      "at": 32.5,
+      "at": 26.7,
       "action": "openTooltip",
       "nodeId": "self-attention"
     },
     {
-      "at": 35.0,
+      "at": 30.0,
       "action": "closeTooltip",
       "nodeId": "self-attention"
     },
@@ -165,7 +165,7 @@
       "at": 30.0,
       "action": "cameraFocus",
       "target": [0, 0, 0],
-      "distance": 1100,
+      "distance": 900,
       "duration": 9.0,
       "easing": "ease-in-out"
     },
@@ -327,7 +327,7 @@
       "at": 74.0,
       "action": "cameraFocus",
       "target": [0, 0, 0],
-      "distance": 1100,
+      "distance": 1400,
       "duration": 5.0,
       "easing": "ease-in-out"
     },
@@ -514,6 +514,14 @@
       "windUp": 2.0,
       "windDown": 2.0,
       "easing": "linear"
+    },
+    {
+      "at": 153.0,
+      "action": "cameraFocus",
+      "target": [0, 0, 0],
+      "distance": 1100,
+      "duration": 5.0,
+      "easing": "ease-in-out"
     },
     {
       "at": 153.0,
@@ -900,49 +908,24 @@
       "easing": "ease-in-out"
     },
     {
-      "at": 270.5,
+      "at": 271.0,
       "action": "highlightLowerSlice",
       "to": 3
     },
     {
-      "at": 271.0,
-      "action": "highlightLowerSlice",
-      "to": 6
-    },
-    {
-      "at": 271.5,
+      "at": 272.0,
       "action": "highlightLowerSlice",
       "to": 9
     },
     {
-      "at": 272.0,
+      "at": 273.0,
       "action": "highlightLowerSlice",
       "to": 12
     },
     {
-      "at": 272.5,
-      "action": "highlightLowerSlice",
-      "to": 16
-    },
-    {
-      "at": 273.0,
-      "action": "highlightLowerSlice",
-      "to": 20
-    },
-    {
-      "at": 273.5,
-      "action": "highlightLowerSlice",
-      "to": 24
-    },
-    {
       "at": 274.0,
       "action": "highlightLowerSlice",
-      "to": 28
-    },
-    {
-      "at": 274.5,
-      "action": "highlightLowerSlice",
-      "to": 32
+      "to": 15
     },
     {
       "at": 275.0,
@@ -1301,6 +1284,16 @@
       "easing": "ease-in-out"
     },
     {
+      "at": 390.4,
+      "action": "autoRotate",
+      "axis": "y",
+      "speed": 0.01,
+      "duration": 13.0,
+      "windDown": 1.0,
+      "windUp": 1.0,
+      "easing": "linear"
+    },
+    {
       "at": 395.0,
       "action": "selectNode",
       "nodeId": "convergence",
@@ -1361,6 +1354,12 @@
       "distance": 240,
       "duration": 5.5,
       "easing": "ease-in-out"
+    },
+    {
+      "at": 404.5,
+      "action": "changeNodeSizeMode",
+      "mode": "default",
+      "duration": 5.5
     },
     {
       "at": 410.5,
@@ -1482,7 +1481,7 @@
       "action": "autoRotate",
       "axis": "y",
       "speed": 0.03,
-      "duration": 40.0,
+      "duration": 80.0,
       "windUp": 5.0,
       "windDown": 5.0,
       "easing": "linear"
