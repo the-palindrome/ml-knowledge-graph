@@ -778,6 +778,7 @@ function buildContextVideoVisualStyle(selectionContext, {
       nodeSet: prerequisiteSet,
       colorHex: PREREQUISITES_EDGE_COLOR,
       opacity: 0.6,
+      dynamicOpacity: true,
     });
   }
   if (showDependents) {
@@ -1690,7 +1691,11 @@ function applySelectionHighlight(selectionContext, options = {}) {
 
   const edgeGroups = [];
   if (pathHighlightState.showPrerequisites) {
-    edgeGroups.push({ nodeSet: prerequisiteSet, colorHex: PREREQUISITES_EDGE_COLOR });
+    edgeGroups.push({
+      nodeSet: prerequisiteSet,
+      colorHex: PREREQUISITES_EDGE_COLOR,
+      dynamicOpacity: true,
+    });
   }
   if (pathHighlightState.showDependents) {
     edgeGroups.push({
