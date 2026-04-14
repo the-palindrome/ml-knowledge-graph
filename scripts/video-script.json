@@ -165,7 +165,7 @@
       "at": 30.0,
       "action": "cameraFocus",
       "target": [0, 0, 0],
-      "distance": 900,
+      "distance": 800,
       "duration": 9.0,
       "easing": "ease-in-out"
     },
@@ -324,11 +324,11 @@
       "action": "closeAllTooltips"
     },
     {
-      "at": 74.0,
+      "at": 75.5,
       "action": "cameraFocus",
       "target": [0, 0, 0],
       "distance": 1400,
-      "duration": 5.0,
+      "duration": 3.5,
       "easing": "ease-in-out"
     },
     {
@@ -937,9 +937,9 @@
       "action": "autoRotate",
       "axis": "y",
       "speed": 0.01,
-      "duration": 8.0,
-      "windUp": 3.0,
-      "windDown": 3.0,
+      "duration": 5.5,
+      "windUp": 1.0,
+      "windDown": 1.0,
       "easing": "linear"
     },
     {
@@ -1075,11 +1075,11 @@
       "easing": "ease-in-out"
     },
     {
-      "at": 360.4,
+      "at": 363.4,
       "action": "autoRotate",
       "axis": "y",
       "speed": 0.01,
-      "duration": 25.0,
+      "duration": 22.0,
       "windDown": 1.0,
       "windUp": 1.0,
       "easing": "linear"
@@ -1472,9 +1472,15 @@
       "at": 433.0,
       "action": "cameraFocus",
       "target": [0, 0, 0],
-      "distance": 1100,
+      "distance": 800,
       "duration": 7.0,
       "easing": "ease-in-out"
+    },
+    {
+      "at": 433.0,
+      "action": "changeNodeSizeMode",
+      "mode": "_betweenness_centrality",
+      "duration": 7.0
     },
     {
       "at": 440.0,
