@@ -509,7 +509,7 @@ Required:
 Optional:
 
 - `opacity` (number in `[0,1]`, default `1`)
-- `size` (`"small" | "medium" | "large"`, default `"medium"`)
+- `size` (`"small" | "medium" | "large" | "extra-large"`, default `"medium"`)
 - `duration` (enables fade over time)
 - `at`
 

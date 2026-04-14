@@ -79,10 +79,12 @@ const TOOLTIP_ANCHOR_VISIBILITY_PADDING = 24;
 const VIDEO_TOOLTIP_SIZE_SMALL = 'small';
 const VIDEO_TOOLTIP_SIZE_MEDIUM = 'medium';
 const VIDEO_TOOLTIP_SIZE_LARGE = 'large';
+const VIDEO_TOOLTIP_SIZE_EXTRA_LARGE = 'extra-large';
 const VIDEO_TOOLTIP_SIZE_SCALE = Object.freeze({
   [VIDEO_TOOLTIP_SIZE_SMALL]: 0.84,
   [VIDEO_TOOLTIP_SIZE_MEDIUM]: 1,
   [VIDEO_TOOLTIP_SIZE_LARGE]: 1.24,
+  [VIDEO_TOOLTIP_SIZE_EXTRA_LARGE]: 2,
 });
 const VIDEO_TOOLTIP_SIZE_OPTIONS = new Set(Object.keys(VIDEO_TOOLTIP_SIZE_SCALE));
 const VIDEO_DURATION_EPSILON = 1e-6;
@@ -2278,11 +2280,11 @@ function isVideoSceneStateAction(actionName) {
 
 function normalizeVideoTooltipSize(rawSize, actionName, index) {
   if (rawSize == null) return VIDEO_TOOLTIP_SIZE_MEDIUM;
-  const size = String(rawSize).trim().toLowerCase();
+  const size = String(rawSize).trim().toLowerCase().replace(/[_\s]+/g, '-');
   if (!VIDEO_TOOLTIP_SIZE_OPTIONS.has(size)) {
     throw new Error(
       `Action "${actionName}" at index ${index} has invalid tooltip size "${rawSize}".`
-      + ` Expected one of: ${VIDEO_TOOLTIP_SIZE_SMALL}, ${VIDEO_TOOLTIP_SIZE_MEDIUM}, ${VIDEO_TOOLTIP_SIZE_LARGE}.`,
+      + ` Expected one of: ${VIDEO_TOOLTIP_SIZE_SMALL}, ${VIDEO_TOOLTIP_SIZE_MEDIUM}, ${VIDEO_TOOLTIP_SIZE_LARGE}, ${VIDEO_TOOLTIP_SIZE_EXTRA_LARGE}.`,
     );
   }
   return size;
